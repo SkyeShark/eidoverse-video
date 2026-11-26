@@ -1,0 +1,122 @@
+#version 460
+// `run --stream`: the previous published frame warped to this one, per pixel, as runRun's HistoryImage::sample does on
+// the CPU (the demo's historySample of nr_common.glsl: five-tap Catmull-Rom over a linear sampler's fetches, edges
+// clamped), operation for operation (stream_common.glsl). The motion comes as a renderer's raw vector channels, read
+// with the caller's convention (two f16 planes, dx then dy, in pixels, current -> previous, rows down; flags 4 / 8
+// negate them) and is turned into what a `run --list` motion file holds: uv = d / size, and a history only where the
+// previous position lands inside the frame (x + 0.5 + dx in (0, W), y + 0.5 + dy in (0, H)). Out: the warped RGB and,
+// in alpha, 1 where the pixel has a history, else 0.
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_GOOGLE_include_directive : require
+#include "stream_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  uint flags;   // 4: negate dx, 8: negate dy
+} pc;
+
+layout(std430, binding = 0) readonly buffer Motion { uint16_t motion[]; };    // [2][height][width] f16 bits
+layout(std430, binding = 1) readonly buffer History { float history[]; };     // [height][width][3] the previous published frame
+layout(std430, binding = 2) writeonly buffer Warped { vec4 warped[]; };       // [height][width]
+
+// HistoryImage::fetch: a linear sampler with its edges clamped, at uv (u, v).
+vec3 fetchLinear(float u, float v) {
+  const float W = float(pc.width), H = float(pc.height);
+  precise float x = u * W - 0.5;
+  precise float y = v * H - 0.5;
+  precise float x0f = floor(x);
+  precise float y0f = floor(y);
+  precise float fx = x - x0f;
+  precise float fy = y - y0f;
+  const int lastX = int(pc.width) - 1, lastY = int(pc.height) - 1;
+  const int x0 = clamp(int(x0f), 0, lastX), x1 = clamp(int(x0f) + 1, 0, lastX);
+  const int y0 = clamp(int(y0f), 0, lastY), y1 = clamp(int(y0f) + 1, 0, lastY);
+  const uint i00 = (uint(y0) * pc.width + uint(x0)) * 3u, i01 = (uint(y0) * pc.width + uint(x1)) * 3u;
+  const uint i10 = (uint(y1) * pc.width + uint(x0)) * 3u, i11 = (uint(y1) * pc.width + uint(x1)) * 3u;
+  vec3 result;
+  for (uint c = 0u; c < 3u; ++c) {
+    precise float a = history[i00 + c];
+    precise float b = history[i01 + c];
+    precise float d = history[i10 + c];
+    precise float e = history[i11 + c];
+    precise float top = a + (b - a) * fx;
+    precise float bottom = d + (e - d) * fx;
+    precise float value = top + (bottom - top) * fy;
+    result[c] = value;
+  }
+  return result;
+}
+
+// The Catmull-Rom weights of HistoryImage::sample.
+void catmullRom(float f, out float w0, out float w1, out float w2, out float w3) {
+  precise float square = f * f;
+  precise float cube = f * square;
+  precise float a = fma(f + cube, -0.5, square);
+  precise float b = (cube * 1.5 - square * 2.5) + 1.0;
+  precise float d = (cube - square) * 0.5;
+  precise float c = ((1.0 - a) - b) - d;
+  w0 = a; w1 = b; w2 = c; w3 = d;
+}
+
+// HistoryImage::sample at pixel (px, py) moved by (mu, mv) in uv.
+vec3 historySample(float px, float py, float mu, float mv) {
+  const float W = float(pc.width), H = float(pc.height);
+  precise float posX = (divRn(px + 0.5, W) + mu) * W;
+  precise float posY = (divRn(py + 0.5, H) + mv) * H;
+  precise float baseX = floor(posX - 0.5) + 0.5;
+  precise float baseY = floor(posY - 0.5) + 0.5;
+  precise float fx = clamp(posX - baseX, 0.0, 1.0);
+  precise float fy = clamp(posY - baseY, 0.0, 1.0);
+  float w0x, w1x, w2x, w3x, w0y, w1y, w2y, w3y;
+  catmullRom(fx, w0x, w1x, w2x, w3x);
+  catmullRom(fy, w0y, w1y, w2y, w3y);
+  precise float midX = w1x + w2x;
+  precise float midY = w1y + w2y;
+  precise float lowX = divRn(clamp(baseX - 1.0, 0.5, W - 0.5), W);
+  precise float lowY = divRn(clamp(baseY - 1.0, 0.5, H - 0.5), H);
+  precise float cenX = divRn(clamp(baseX + divRn(w2x, midX), 0.5, W - 0.5), W);
+  precise float cenY = divRn(clamp(baseY + divRn(w2y, midY), 0.5, H - 0.5), H);
+  precise float highX = divRn(clamp(baseX + 2.0, 0.5, W - 0.5), W);
+  precise float highY = divRn(clamp(baseY + 2.0, 0.5, H - 0.5), H);
+  const vec3 left = fetchLinear(lowX, cenY);
+  const vec3 top = fetchLinear(cenX, lowY);
+  const vec3 mid = fetchLinear(cenX, cenY);
+  const vec3 bottom = fetchLinear(cenX, highY);
+  const vec3 right = fetchLinear(highX, cenY);
+  precise float a = w0x * midY;
+  precise float b = w0y * midX;
+  precise float c = midX * midY;
+  precise float d = w3y * midX;
+  precise float e = w3x * midY;
+  precise float norm = divRn(1.0, e + (d + (c + (a + b))));
+  vec3 result;
+  for (uint k = 0u; k < 3u; ++k) {
+    precise float value = fma(left[k], a, top[k] * b);
+    value = fma(mid[k], c, value);
+    value = fma(bottom[k], d, value);
+    value = fma(right[k], e, value);
+    precise float scaled = value * norm;
+    result[k] = scaled;
+  }
+  return result;
+}
+
+void main() {
+  const uvec2 id = gl_GlobalInvocationID.xy;
+  if (id.x >= pc.width || id.y >= pc.height) return;
+  const uint pixel = id.y * pc.width + id.x, plane = pc.width * pc.height;
+  float dx = halfBitsToFloat(uint(motion[pixel])), dy = halfBitsToFloat(uint(motion[plane + pixel]));
+  if ((pc.flags & 4u) != 0u) dx = -dx;
+  if ((pc.flags & 8u) != 0u) dy = -dy;
+  // motion_rgba: px, py = XS + 0.5 + dx, YS + 0.5 + dy (f32); on screen where 0 < px < W and 0 < py < H
+  precise float px = (float(id.x) + 0.5) + dx;
+  precise float py = (float(id.y) + 0.5) + dy;
+  const bool onScreen = px > 0.0 && px < float(pc.width) && py > 0.0 && py < float(pc.height);
+  vec4 result = vec4(0.0);
+  if (onScreen) result = vec4(historySample(float(id.x), float(id.y), divRn(dx, float(pc.width)), divRn(dy, float(pc.height))), 1.0);
+  warped[pixel] = result;
+}

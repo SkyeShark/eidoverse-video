@@ -243,6 +243,92 @@ Laptop GPU. The halo's blur pyramid skips its passes when `halo × force` is
 0. The [UNKNOWN FORCE sets](../eidoverse/sets/unknown_force/README.md) give
 their per-shot totals with the pass on.
 
+## DLSS 5 over a finished film
+
+`dlss5nr/` puts a finished film through NVIDIA's DLSS 5 Neural Rendering
+network, as [OpenDLSS-NR](https://github.com/maanHimself/OpenDLSS-NR) (MIT)
+reimplements it: the network re-renders each frame at the same size, adding
+the detail, shading and tone of its training. It is not an upscaler and not one
+of the TSL effects above. It runs on the host after the render, on the film's
+H.264, before any grain or print-style pass (it would smooth the grain away).
+
+**What it needs.** Windows; an NVIDIA Ada (or newer) GPU with a driver exposing
+`VK_KHR_cooperative_matrix`, `VK_NV_cooperative_matrix2`, `VK_EXT_shader_float8`
+and `VK_NV_cuda_kernel_launch`; Visual Studio 2022 or later with the C++ x64
+toolset, git and Python 3 to build; ffmpeg and numpy to run; OpenCV for
+`flow_motion.py`. **You supply the weights**: a model directory in
+OpenDLSS-NR's layout (its `manifest.json` and stage files), given as `--model`
+or `DLSS5VK_MODEL`. This toolkit ships no NVIDIA software or weights and no
+instructions for obtaining them. OpenDLSS-NR is not affiliated with or endorsed
+by NVIDIA, and "DLSS" is NVIDIA's trademark; the patch's upstream `LICENSE` and
+`NOTICE` are in `dlss5nr/patch/`.
+
+**Build once.** `python dlss5nr/build.py` clones OpenDLSS-NR at the commit the
+patch is made for (9d08f41) into `dlss5nr/opendlss/` (git-ignored), applies
+`patch/opendlss_stream.diff` (the `run --list` and `run --stream` modes) and
+copies the stream's compute shaders beside upstream's, then runs upstream's own
+`fetch_tools.ps1` and `build.ps1`. `--dir` builds somewhere else: upstream's
+toolchain fetch unpacks CMake to files 141 characters below the clone, so its
+path must stay within 118 characters (Windows' path limit); the script says so
+before it starts.
+
+**Run.**
+```bash
+python dlss5nr/dlss5nr.py work/<id>/film.mp4 work/<id>/film_dlss5.mp4 --model <weights> --style 1
+```
+The film is decoded, every frame streams through one `dlss5vk run --stream`
+and back into x264 (High, yuv420p, crf 16), and the film's own sound is muxed
+back; nothing else is written. A display-referred film maps into the network's
+proxy through NVIDIA's shoulder and back out through its inverse, so wherever
+the network changes nothing the grade returns as it was (an 8-bit value
+survives the round trip exactly). `--style` 0 is the default; 1 moves the
+picture furthest, toward crisper shading and richer colour; `--tone` and
+`--structure` scale the default; `--skin -1` is automatic. `--from` / `--to`
+pick a range and `--keep-rest` keeps the frames outside it unchanged;
+`--stills <dir>` writes every 12th frame as a before | after PNG. On an RTX 5090
+Laptop GPU a 1920 × 1080 film streams at about 45 frames a second, the network
+itself 7.7–8 ms a frame.
+
+**The temporal path.** Frame by frame, the network re-renders each frame on its
+own and the light flickers. With motion vectors it carries its history as a
+game does: the previous published frame, warped by the motion, blended by the
+network's own per-pixel weight. The history resets on the first frame and at
+every `--cuts` frame. Two sources write the motion files (one
+`<frame:04d>.npz` a frame, the layout in `dlss5nr/motion_npz.py`):
+
+- **The runner**, from three's velocity: add `"motionVectors":
+  "work/<id>/motion"` to `scene.json` and render. The auto-enhance scene pass
+  carries one more attachment and every frame's motion is written beside the
+  film, numbered by the video's frames (offset 0). It follows the camera, object
+  transforms, skinned characters and instanced meshes. It does not follow
+  vertex motion made in a material's `positionNode` (the flora's wind, cloth,
+  GPU particles and fluids) or morph targets: those read as motion they do not
+  have. A scene that sets `_noAutoEnhance` gets no motion files (the run says
+  so). The picture is unchanged by the attachment.
+- **`flow_motion.py`**, optical flow from the film itself (OpenCV DIS): it sees
+  whatever moves on screen, wind and cloth included, and is rough on fine, fast
+  detail and at disocclusions. Use it for films whose motion is mostly vertex
+  animation, or with `_noAutoEnhance`.
+
+```bash
+python dlss5nr/motion_check.py work/<id>/film.mp4 work/<id>/motion --frames 24,48,96 --offset 0
+python dlss5nr/dlss5nr.py work/<id>/film.mp4 work/<id>/film_dlss5.mp4 --model <weights> --style 1 \
+    --motion work/<id>/motion --convention "+X -Y" --offset 0 --cuts 120,264
+python dlss5nr/flicker.py work/<id>/film.mp4 work/<id>/film_dlss5.mp4
+```
+`motion_check.py` warps each chosen frame's predecessor by every reading of
+the files and names the one that matches the picture; both sources here read as
+`"+X -Y"`, and comparing their warp errors on the same frames says which suits
+a film better. `--cuts` lists the frames that start a shot (video frames with
+offset 0). `flicker.py` measures the result: where the input holds still, the
+output should change about as little.
+
+The example `eidoverse/examples/motion_vectors/` renders a short pan with the
+motion output on and `check.py` checks it (files, convention, an unchanged
+picture). Tests without a GPU: `python dlss5nr/tests/test_dlss5nr.py` (the
+stream through a stand-in program) and `deno test --no-check --allow-read
+--node-modules-dir=manual --no-lock eidoverse/motion_vectors_test.mjs`.
+
 ## After the render: the release print — `film_print.py`
 
 `film_print.py` prints a finished film as a period release print. It works on

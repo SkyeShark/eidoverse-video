@@ -1,0 +1,804 @@
+diff --git a/src/main.cpp b/src/main.cpp
+index 6d57e3a..cc21a99 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -1,19 +1,29 @@
+ // dlss5vk: standalone Vulkan DLSS-NR runner.
+ //   dlss5vk parity --model <nr model dir> --fixture <fixtures/nr512> [--repeat N] [--shaders <dir>] [--dump <dir>]
+ //   dlss5vk bench  --model <nr model dir> --width W --height H [--frames N]
++//   dlss5vk run    --model <nr model dir> --width W --height H --list <file | ->     (a video's frames, as files)
++//   dlss5vk run    --model <nr model dir> --width W --height H --stream              (the same, binary stdin/stdout)
++#include <fcntl.h>
++#include <io.h>
++
+ #include <algorithm>
+ #include <chrono>
+ #include <cmath>
++#include <condition_variable>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
++#include <exception>
+ #include <filesystem>
+ #include <fstream>
++#include <iostream>
+ #include <array>
+ #include <map>
++#include <mutex>
+ #include <set>
+ #include <sstream>
+ #include <string>
++#include <thread>
+ #include <vector>
+ 
+ #include "json.h"
+@@ -731,7 +741,769 @@ int runProfile(int argc, char** argv) {
+ }
+ }  // namespace
+ 
++// `run`: a video's frames through the network, as the parity path runs a proxy fixture: an RGBA f32 display proxy in,
++// the published RGB out (proxy code space, truncated to the half grid), RGBA f32 with the head's blend logit in alpha.
++// The graph is built once; each list line is a frame. A line with no motion file (or reset 1) runs with no history and
++// publishes exactly `composed`; with a motion file and reset 0, the previous published frame is the history, as the
++// demo's temporal path (HistoryImage below). --list - reads the lines from stdin and answers "[frame] <out>" after
++// each, so a caller can stream a video through one graph.
++//   dlss5vk run --model <dir> --width W --height H --list <file | ->
++//               [--tone 1] [--structure 1] [--skin -1] [--style 0] [--no-automask]
++//   lines: <proxy.f32> <out.f32> <seed> [<motion.f32 | -> <reset 0|1>]
++
++// The temporal path's host side, as the demo's nr_common.glsl, nr_preprocess.comp and nr_composite.comp: the previous
++// published frame, warped by the motion (current -> previous, uv units, rows down) and reconstructed with the five-tap
++// Catmull-Rom over a linear sampler's fetches (edges clamped), stands in lanes 7-9 in place of the proxy's second copy;
++// after the network, its own weight sigmoid(logit) x blend_scale blends that same sample into the composed frame, and
++// the result, truncated to half, is both the published frame and the next history.
++struct HistoryImage {
++  uint32_t width = 0, height = 0;
++  std::vector<float> rgb;   // top-down rows, 3 floats a pixel
++
++  void fetch(float u, float v, float out[3]) const {   // a linear sampler, clamp to edge
++    const float x = u * (float)width - 0.5f, y = v * (float)height - 0.5f;
++    const float x0f = std::floor(x), y0f = std::floor(y), fx = x - x0f, fy = y - y0f;
++    const int x0 = std::clamp((int)x0f, 0, (int)width - 1), x1 = std::clamp((int)x0f + 1, 0, (int)width - 1);
++    const int y0 = std::clamp((int)y0f, 0, (int)height - 1), y1 = std::clamp((int)y0f + 1, 0, (int)height - 1);
++    for (int c = 0; c < 3; ++c) {
++      const float a = rgb[((size_t)y0 * width + x0) * 3 + c], b = rgb[((size_t)y0 * width + x1) * 3 + c];
++      const float d = rgb[((size_t)y1 * width + x0) * 3 + c], e = rgb[((size_t)y1 * width + x1) * 3 + c];
++      const float top = a + (b - a) * fx, bottom = d + (e - d) * fx;
++      out[c] = top + (bottom - top) * fy;
++    }
++  }
++
++  // historySample of nr_common.glsl at pixel (px, py) moved by (mu, mv)
++  void sample(float px, float py, float mu, float mv, float out[3]) const {
++    const float W = (float)width, H = (float)height;
++    const float posX = ((px + 0.5f) / W + mu) * W, posY = ((py + 0.5f) / H + mv) * H;
++    const float baseX = std::floor(posX - 0.5f) + 0.5f, baseY = std::floor(posY - 0.5f) + 0.5f;
++    const float fx = std::clamp(posX - baseX, 0.0f, 1.0f), fy = std::clamp(posY - baseY, 0.0f, 1.0f);
++    auto weights = [](float f, float& w0, float& w1, float& w2, float& w3) {
++      const float square = f * f, cube = f * square;
++      w0 = std::fmaf(f + cube, -0.5f, square);
++      w1 = (cube * 1.5f - square * 2.5f) + 1.0f;
++      w3 = (cube - square) * 0.5f;
++      w2 = ((1.0f - w0) - w1) - w3;
++    };
++    float w0x, w1x, w2x, w3x, w0y, w1y, w2y, w3y;
++    weights(fx, w0x, w1x, w2x, w3x);
++    weights(fy, w0y, w1y, w2y, w3y);
++    const float midX = w1x + w2x, midY = w1y + w2y;
++    const float lowX = std::clamp(baseX - 1.0f, 0.5f, W - 0.5f) / W, lowY = std::clamp(baseY - 1.0f, 0.5f, H - 0.5f) / H;
++    const float cenX = std::clamp(baseX + w2x / midX, 0.5f, W - 0.5f) / W;
++    const float cenY = std::clamp(baseY + w2y / midY, 0.5f, H - 0.5f) / H;
++    const float highX = std::clamp(baseX + 2.0f, 0.5f, W - 0.5f) / W, highY = std::clamp(baseY + 2.0f, 0.5f, H - 0.5f) / H;
++    float left[3], top[3], mid[3], bottom[3], right[3];
++    fetch(lowX, cenY, left);
++    fetch(cenX, lowY, top);
++    fetch(cenX, cenY, mid);
++    fetch(cenX, highY, bottom);
++    fetch(highX, cenY, right);
++    const float a = w0x * midY, b = w0y * midX, c = midX * midY, d = w3y * midX, e = w3x * midY;
++    const float norm = 1.0f / (e + (d + (c + (a + b))));
++    for (int k = 0; k < 3; ++k) {
++      float value = std::fmaf(left[k], a, top[k] * b);
++      value = std::fmaf(mid[k], c, value);
++      value = std::fmaf(bottom[k], d, value);
++      value = std::fmaf(right[k], e, value);
++      out[k] = value * norm;
++    }
++  }
++};
++
++int runRun(int argc, char** argv) {
++  std::string modelDir = argValue(argc, argv, "--model");
++  std::string shaderDir = argValue(argc, argv, "--shaders", executableDirectory(argv[0]) + "/shaders");
++  std::string listFile = argValue(argc, argv, "--list");
++  const uint32_t width = (uint32_t)atoi(argValue(argc, argv, "--width", "0").c_str());
++  const uint32_t height = (uint32_t)atoi(argValue(argc, argv, "--height", "0").c_str());
++  if (modelDir.empty() || listFile.empty() || !width || !height) {
++    fprintf(stderr, "usage: dlss5vk run --model <dir> --width W --height H --list <file | - for stdin> [--tone 1] "
++                    "[--structure 1] [--skin -1] [--style 0] [--no-automask]\n"
++                    "  each line: <proxy.f32> <out.f32> <seed> [<motion.f32 | -> <reset 0|1>]\n"
++                    "  (W x H RGBA f32 files; motion: xy current -> previous in uv units, rows down, z 1 where it has a\n"
++                    "  history; with a motion file and reset 0 the previous published frame is the history)\n");
++    return 2;
++  }
++  const float tone = (float)atof(argValue(argc, argv, "--tone", "1").c_str());
++  const float structure = (float)atof(argValue(argc, argv, "--structure", "1").c_str());
++  const float skin = (float)atof(argValue(argc, argv, "--skin", "-1").c_str());
++  const float style = (float)atof(argValue(argc, argv, "--style", "0").c_str());
++  const bool autoMask = !hasFlag(argc, argv, "--no-automask");
++  vk::Context context;
++  printf("device: %s\n", context.deviceName().c_str());
++  nr::Model model(context, modelDir, !hasFlag(argc, argv, "--no-verify"));
++  const nr::Tensor& blend = model.tensor(70, 0, "blend_scale");   // one f16, read as the demo reads it
++  const float blendScale = blend.byteLength >= 2 ? num::f16ToF32((uint16_t)(blend.bytes[0] | (blend.bytes[1] << 8))) : 1.0f;
++  printf("blend scale %g\n", blendScale);
++  nr::Kernels kernels(context, shaderDir);
++  kernels.setSiluTable(ref::siluTable());
++  nr::Geometry geometry = nr::Geometry::fromValid(width, height);
++  const uint32_t fullRows = geometry.fullWidth * geometry.fullHeight;
++  nr::Activation features;
++  features.format = nr::Format::F32; features.rows = fullRows; features.channels = 16; features.allocRows = nr::alignRows(fullRows);
++  features.label = "input features";
++  features.buffer = context.createBuffer((VkDeviceSize)features.allocRows * 16 * 4, false, "input features");
++  const size_t proxyBytes = (size_t)width * height * 16;
++  vk::Buffer proxyBuffer = context.createBuffer(proxyBytes, false, "proxy");
++  nr::Graph::Options options;
++  options.captureBoundaries = false;
++  options.fusedBlocks = fusedBlocksEnabled();
++  nr::Graph graph(context, model, kernels, geometry, options);
++  VkQueryPool queries = context.createTimestampPool(2);
++  const bool streaming = listFile == "-";   // a line at a time from stdin, "[frame] <out>" after each
++  std::ifstream listFileStream;
++  if (!streaming) listFileStream.open(listFile);
++  std::istream& list = streaming ? std::cin : listFileStream;
++  std::string line;
++  int frames = 0, temporalFrames = 0;
++  double gpuMs = 0, weightSum = 0;
++  size_t weightCount = 0;
++  std::vector<float> rgba((size_t)width * height * 4, 1.0f);
++  HistoryImage history;
++  history.width = width; history.height = height;
++  history.rgb.assign((size_t)width * height * 3, 0.0f);
++  bool haveHistory = false;
++  std::vector<float> warped((size_t)width * height * 3, 0.0f);
++  while (std::getline(list, line)) {
++    std::istringstream fields(line);
++    std::string in, out, motionToken, resetToken;
++    uint32_t seed = 0;
++    if (!(fields >> in >> out >> seed)) continue;
++    fields >> motionToken >> resetToken;
++    const bool hasMotion = !motionToken.empty() && motionToken != "-";
++    const bool temporal = haveHistory && hasMotion && resetToken != "1";
++    std::vector<uint8_t> proxy = readFile(in);
++    if (proxy.size() != proxyBytes)
++      throw std::runtime_error(in + ": not " + std::to_string(width) + "x" + std::to_string(height) + " RGBA f32");
++    std::vector<uint8_t> motionBytes;
++    const float* motion = nullptr;
++    if (temporal) {
++      motionBytes = readFile(motionToken);
++      if (motionBytes.size() != proxyBytes)
++        throw std::runtime_error(motionToken + ": not " + std::to_string(width) + "x" + std::to_string(height) + " RGBA f32");
++      motion = reinterpret_cast<const float*>(motionBytes.data());
++      for (uint32_t y = 0; y < height; ++y)   // once a pixel: the lanes and the blend use the same sample
++        for (uint32_t x = 0; x < width; ++x) {
++          const size_t p = (size_t)y * width + x;
++          if (motion[p * 4 + 2] > 0.5f) history.sample((float)x, (float)y, motion[p * 4], motion[p * 4 + 1], &warped[p * 3]);
++        }
++    }
++    context.fillZero(features.buffer);
++    context.upload(proxyBuffer, proxy.data(), proxy.size());
++    nr::Kernels::PreprocessArgs preprocess{geometry.fullWidth, geometry.fullHeight, width, height, width, height, seed,
++                                           autoMask, tone, structure, skin, style};
++    context.resetDescriptorPool();
++    VkCommandBuffer commands = context.beginCommands();
++    kernels.preprocessFromProxy(commands, proxyBuffer, features, preprocess);
++    context.endAndSubmit(commands, true);
++    if (temporal) {   // lanes 7-9: the warped history, centred as the proxy is; the padding mirrors as the shader's
++      const VkDeviceSize featureBytes = (VkDeviceSize)fullRows * 16 * 4;
++      std::vector<uint8_t> featureData = context.download(features.buffer, featureBytes);
++      float* lanes = reinterpret_cast<float*>(featureData.data());
++      for (uint32_t y = 0; y < geometry.fullHeight; ++y)
++        for (uint32_t x = 0; x < geometry.fullWidth; ++x) {
++          const uint32_t sx = x < width ? x : 2u * width - x - 2u, sy = y < height ? y : 2u * height - y - 2u;
++          const size_t p = (size_t)sy * width + sx;
++          if (motion[p * 4 + 2] <= 0.5f) continue;   // no history there: the proxy's copy stays, as on a first frame
++          float* f = lanes + ((size_t)y * geometry.fullWidth + x) * 16;
++          for (int c = 0; c < 3; ++c) f[7 + c] = num::roundF16(num::roundF16(num::roundF16(warped[p * 3 + c]) - 0.5f) * 0.125f);
++        }
++      context.upload(features.buffer, featureData.data(), featureBytes);
++    }
++    context.resetDescriptorPool();
++    commands = context.beginCommands();
++    vkCmdResetQueryPool(commands, queries, 0, 2);
++    vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, queries, 0);
++    graph.record(commands, features);
++    vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, 1);
++    context.endAndSubmit(commands, true);
++    checkChainTimeouts(kernels);
++    std::vector<double> stamps = context.readTimestampsMs(queries, 2);
++    gpuMs += stamps[1] - stamps[0];
++    std::vector<uint8_t> headBytes = context.download(graph.head().buffer, graph.head().validBytes());
++    const float* head = reinterpret_cast<const float*>(headBytes.data());
++    const float* values = reinterpret_cast<const float*>(proxy.data());
++    for (uint32_t y = 0; y < height; ++y)
++      for (uint32_t x = 0; x < width; ++x) {
++        const size_t pixel = (size_t)y * width + x, h = ((size_t)y * geometry.fullWidth + x) * 4;
++        const bool blendHere = temporal && motion[pixel * 4 + 2] > 0.5f;
++        const float weight = blendHere ? std::fmin(std::fmax((1.0f / (1.0f + std::exp(-head[h + 3]))) * blendScale, 0.0f), 1.0f) : 0.0f;
++        if (blendHere) { weightSum += weight; ++weightCount; }
++        for (uint32_t c = 0; c < 3; ++c) {
++          const float centred = std::fmaf(values[pixel * 4 + c], 0.125f, -0.0625f);
++          float neural = std::fmin(std::fmax(std::fmaf(head[h + c], 0.03125f, centred) * 8.0f + 0.5f, 0.0f), 1.0f);
++          if (blendHere) neural = std::fmaf(weight, warped[pixel * 3 + c] - neural, neural);
++          const float published = truncateHalf(neural);   // without a blend: composed() exactly
++          rgba[pixel * 4 + c] = published;
++          history.rgb[pixel * 3 + c] = published;
++        }
++        rgba[pixel * 4 + 3] = head[h + 3];
++      }
++    haveHistory = true;
++    if (temporal) ++temporalFrames;
++    std::ofstream(out, std::ios::binary).write(reinterpret_cast<const char*>(rgba.data()), rgba.size() * 4);
++    ++frames;
++    if (streaming) { printf("[frame] %s\n", out.c_str()); fflush(stdout); }
++  }
++  vkDestroyQueryPool(context.device(), queries, nullptr);
++  printf("ran %d frame%s at %ux%u (field %ux%u, %s): network %.3f ms a frame; %d with history, mean weight %.3f\n", frames,
++         frames == 1 ? "" : "s", width, height, geometry.fullWidth, geometry.fullHeight, graph.chained() ? "chained" : "barriers",
++         frames ? gpuMs / frames : 0.0, temporalFrames, weightCount ? weightSum / (double)weightCount : 0.0);
++  context.destroyBuffer(proxyBuffer);
++  context.destroyBuffer(features.buffer);
++  return 0;
++}
++
++// `run --stream`: the frames of `run --list` as binary records on stdin and stdout, no files, and the temporal path on
++// the GPU, fast enough to keep up with a video decoder. A video's 8-bit sRGB frames go in as ffmpeg gives them
++// (-pix_fmt rgb24) and come back the same way. In between, all on the GPU (shaders/stream_*.comp): the 8-bit -> proxy
++// table (PROXY_LUT: srgb_dec, NVIDIA's shoulder, srgb_enc on the half grid), the features (preprocess.comp, as --list),
++// the previous published frame warped by the motion (HistoryImage::sample above) into lanes 7-9, the network, the
++// composite with its blend (runRun's), the history update (the history never leaves the GPU), and the way back to 8
++// bits (BACK_LUT: the shoulder undone, sRGB, read at the nearest 1/4096). The shaders do the CPU path's arithmetic
++// operation for operation (stream_common.glsl), so a video comes out byte for byte as it does through --list with the
++// same tables on the host. A reader thread and a writer thread keep stdin and stdout moving while the GPU works: up to
++// three frames are read ahead, two are on the GPU, three wait for stdout.
++//   dlss5vk run --stream --model <dir> --width W --height H [--tone 1] [--structure 1] [--skin -1] [--style 0]
++//               [--no-automask]
++//   stdout, first (5140 bytes): "NRS1", u32 version 1, u32 W, u32 H; the 256 f32 of the 8-bit -> proxy table; the 4097
++//               bytes of the proxy -> 8-bit table; 3 zero bytes (a caller can check both tables against its own)
++//   stdin, per frame: "NRF1", u32 seed, u32 flags, u32 0; W x H x 3 bytes of 8-bit sRGB, rows top-down; with flag 2,
++//               the motion: two planes of W x H f16, dx then dy, current -> previous in pixels, rows down (Blender's raw
++//               Vector channels: flag 4 negates dx, flag 8 negates dy). Flag 1: reset (no history this frame).
++//   stdout, per frame: W x H x 3 bytes, the published frame in 8-bit sRGB.   The end: close stdin. Text goes to stderr.
++// A frame with motion and no reset blends with the previous published frame wherever its previous position lands
++// inside the frame (x + 0.5 + dx in (0, W) and y + 0.5 + dy in (0, H), as a --list motion file's z marks it).
++namespace {
++
++constexpr uint32_t kStreamHello = 0x3153524eu;   // "NRS1"
++constexpr uint32_t kStreamFrame = 0x3146524eu;   // "NRF1"
++constexpr uint32_t kStreamVersion = 1u;
++constexpr uint32_t kStreamReset = 1u, kStreamMotion = 2u, kStreamNegateX = 4u, kStreamNegateY = 8u;
++constexpr size_t kStreamHelloBytes = 16 + 256 * 4 + 4097 + 3;
++
++struct StreamFrameHeader { uint32_t magic, seed, flags, reserved; };
++static_assert(sizeof(StreamFrameHeader) == 16, "a frame header is 16 bytes");
++
++// All of `bytes`; false only at the end of the stream where one is allowed (before a frame's header).
++bool streamRead(int fd, void* data, size_t bytes, const char* what, bool endAllowed) {
++  uint8_t* cursor = static_cast<uint8_t*>(data);
++  size_t done = 0;
++  while (done < bytes) {
++    const int got = _read(fd, cursor + done, (unsigned)std::min<size_t>(bytes - done, 1u << 30));
++    if (got < 0) throw std::runtime_error(std::string("stdin: reading ") + what + " failed");
++    if (got == 0) {
++      if (done == 0 && endAllowed) return false;
++      throw std::runtime_error(std::string("stdin ended inside ") + what);
++    }
++    done += (size_t)got;
++  }
++  return true;
++}
++
++void streamWrite(int fd, const void* data, size_t bytes) {
++  const uint8_t* cursor = static_cast<const uint8_t*>(data);
++  size_t done = 0;
++  while (done < bytes) {
++    const int put = _write(fd, cursor + done, (unsigned)std::min<size_t>(bytes - done, 1u << 30));
++    if (put <= 0) throw std::runtime_error("stdout: the write failed (has the reader gone?)");
++    done += (size_t)put;
++  }
++}
++
++// The host caller's conversions (numpy's) in float64 arithmetic, so both sides build the same tables; the caller checks
++// the tables in the hello against its own anyway, and refuses a program whose tables differ.
++constexpr double kShoulderK = 5.770780;
++double streamSrgbDecode(double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
++double streamSrgbEncode(double v) {
++  v = v < 0.0 ? 0.0 : v;
++  return v <= 0.0031308 ? v * 12.92 : 1.055 * std::pow(v, 1.0 / 2.4) - 0.055;
++}
++double streamShoulder(double v) { return v > 0.75 ? 0.75 + 0.25 * (1.0 - std::exp(-kShoulderK * (v - 0.75))) : v; }
++double streamUnshoulder(double s) {
++  s = std::min(std::max(s, 0.0), 0.75 + 0.25 * (1.0 - 1e-6));
++  return s > 0.75 ? 0.75 - std::log(1.0 - (s - 0.75) / 0.25) / kShoulderK : s;
++}
++
++// float64 -> binary16 bits, rounded to nearest even once (numpy's astype(np.float16)), for 0 <= value < 65520.
++uint16_t streamHalfFromDouble(double value) {
++  if (!(value > 0.0)) return 0;
++  int exponent = 0;
++  const double fraction = std::frexp(value, &exponent);                         // value = fraction 2^exponent, [0.5, 1)
++  if (exponent <= -14) return (uint16_t)std::nearbyint(std::ldexp(value, 24));   // the subnormal grid, 2^-24
++  double significand = std::nearbyint(std::ldexp(fraction, 11));                 // 1024 .. 2048
++  int halfExponent = exponent + 14;
++  if (significand == 2048.0) { significand = 1024.0; ++halfExponent; }
++  return (uint16_t)(((uint32_t)halfExponent << 10) | ((uint32_t)significand - 1024u));
++}
++
++// PROXY_LUT = srgb_enc(shoulder(srgb_dec(np.arange(256) / 255.0))).astype(np.float16).astype(np.float32)
++std::vector<float> streamProxyTable() {
++  std::vector<float> table(256);
++  for (int i = 0; i < 256; ++i)
++    table[i] = num::f16ToF32(streamHalfFromDouble(streamSrgbEncode(streamShoulder(streamSrgbDecode(i / 255.0)))));
++  return table;
++}
++
++// BACK_LUT = np.clip(srgb_enc(unshoulder(srgb_dec(np.linspace(0.0, 1.0, 4097)))) * 255.0 + 0.5, 0, 255).astype(np.uint8)
++std::vector<uint8_t> streamBackTable() {
++  std::vector<uint8_t> table(4097);
++  for (int i = 0; i <= 4096; ++i) {
++    const double value = streamSrgbEncode(streamUnshoulder(streamSrgbDecode(i * (1.0 / 4096.0)))) * 255.0 + 0.5;
++    table[i] = (uint8_t)std::min(std::max(value, 0.0), 255.0);
++  }
++  return table;
++}
++
++// runRun's blend weight for every value the head's logit can take: the head is on the half grid (its GEMM accumulates in
++// f16), so the composite reads this table at the logit's half bits instead of evaluating the sigmoid; the expression is
++// runRun's, evaluated by the same scalar expf (no vectorized exp: that one rounds differently).
++std::vector<float> streamWeightTable(float blendScale) {
++  std::vector<float> table(65536);
++#pragma loop(no_vector)
++  for (uint32_t bits = 0; bits < 65536; ++bits) {
++    const float logit = num::f16ToF32((uint16_t)bits);
++    table[bits] = std::fmin(std::fmax((1.0f / (1.0f + std::exp(-logit))) * blendScale, 0.0f), 1.0f);
++  }
++  return table;
++}
++
++// A mapped host buffer for the frames in flight: write-combined system memory for an upload, cached for a readback
++// (the CPU reads 6 MB a frame back; from write-combined memory that is slow).
++vk::Buffer streamHostBuffer(vk::Context& context, VkDeviceSize size, bool readback, const char* label) {
++  vk::Buffer result;
++  result.size = size;
++  result.hostVisible = true;
++  result.label = label;
++  VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
++  info.size = size;
++  info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
++  info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
++  VK_CHECK(vkCreateBuffer(context.device(), &info, nullptr, &result.buffer));
++  VkMemoryRequirements requirements;
++  vkGetBufferMemoryRequirements(context.device(), result.buffer, &requirements);
++  VkPhysicalDeviceMemoryProperties properties;
++  vkGetPhysicalDeviceMemoryProperties(context.physical(), &properties);
++  const VkMemoryPropertyFlags needed = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
++  uint32_t chosen = UINT32_MAX;
++  int best = -1;
++  for (uint32_t index = 0; index < properties.memoryTypeCount; ++index) {
++    const VkMemoryPropertyFlags flags = properties.memoryTypes[index].propertyFlags;
++    if (!(requirements.memoryTypeBits & (1u << index)) || (flags & needed) != needed) continue;
++    const bool cached = (flags & VK_MEMORY_PROPERTY_HOST_CACHED_BIT) != 0, local = (flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0;
++    const int score = (cached == readback ? 2 : 0) + (local ? 0 : 1);
++    if (score > best) { best = score; chosen = index; }
++  }
++  if (chosen == UINT32_MAX) throw std::runtime_error(std::string("no host-visible memory for ") + label);
++  VkMemoryAllocateInfo allocate{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
++  allocate.allocationSize = requirements.size;
++  allocate.memoryTypeIndex = chosen;
++  VK_CHECK(vkAllocateMemory(context.device(), &allocate, nullptr, &result.memory));
++  VK_CHECK(vkBindBufferMemory(context.device(), result.buffer, result.memory, 0));
++  VK_CHECK(vkMapMemory(context.device(), result.memory, 0, VK_WHOLE_SIZE, 0, &result.mapped));
++  return result;
++}
++
++void streamBarrier(VkCommandBuffer commands, VkPipelineStageFlags2 srcStage, VkAccessFlags2 srcAccess,
++                   VkPipelineStageFlags2 dstStage, VkAccessFlags2 dstAccess) {
++  VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
++  barrier.srcStageMask = srcStage;
++  barrier.srcAccessMask = srcAccess;
++  barrier.dstStageMask = dstStage;
++  barrier.dstAccessMask = dstAccess;
++  VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
++  dependency.memoryBarrierCount = 1;
++  dependency.pMemoryBarriers = &barrier;
++  vkCmdPipelineBarrier2(commands, &dependency);
++}
++
++// One 8x8-workgroup pass over a width x height grid, then a compute barrier (as Kernels::dispatch).
++void streamDispatch(vk::Context& context, VkCommandBuffer commands, const vk::Pipeline& pipeline,
++                    const vk::Buffer* const bindings[vk::kGenericBindings], const void* push, uint32_t pushBytes,
++                    uint32_t width, uint32_t height) {
++  VkDescriptorSet set = context.allocateSet(bindings);
++  vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.pipeline);
++  vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_COMPUTE, context.pipelineLayout(), 0, 1, &set, 0, nullptr);
++  vkCmdPushConstants(commands, context.pipelineLayout(), VK_SHADER_STAGE_COMPUTE_BIT, 0, pushBytes, push);
++  vkCmdDispatch(commands, (width + 7) / 8, (height + 7) / 8, 1);
++  context.computeBarrier(commands);
++}
++
++double millisecondsSince(std::chrono::steady_clock::time_point start) {
++  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
++}
++
++}  // namespace
++
++int runStream(int argc, char** argv) {
++  std::string modelDir = argValue(argc, argv, "--model");
++  std::string shaderDir = argValue(argc, argv, "--shaders", executableDirectory(argv[0]) + "/shaders");
++  const uint32_t width = (uint32_t)atoi(argValue(argc, argv, "--width", "0").c_str());
++  const uint32_t height = (uint32_t)atoi(argValue(argc, argv, "--height", "0").c_str());
++  if (modelDir.empty() || !width || !height) {
++    fprintf(stderr, "usage: dlss5vk run --stream --model <dir> --width W --height H [--tone 1] [--structure 1] [--skin -1] "
++                    "[--style 0] [--no-automask]\n"
++                    "  stdout first: \"NRS1\", u32 1, u32 W, u32 H, 256 f32 (8-bit -> proxy), 4097 bytes (proxy -> 8-bit), 3 zeros\n"
++                    "  stdin per frame: \"NRF1\", u32 seed, u32 flags (1 reset, 2 motion, 4 negate dx, 8 negate dy), u32 0;\n"
++                    "    W x H x 3 bytes 8-bit sRGB; with flag 2: W x H f16 dx, then W x H f16 dy (pixels, current -> previous)\n"
++                    "  stdout per frame: W x H x 3 bytes 8-bit sRGB\n");
++    return 2;
++  }
++  const float tone = (float)atof(argValue(argc, argv, "--tone", "1").c_str());
++  const float structure = (float)atof(argValue(argc, argv, "--structure", "1").c_str());
++  const float skin = (float)atof(argValue(argc, argv, "--skin", "-1").c_str());
++  const float style = (float)atof(argValue(argc, argv, "--style", "0").c_str());
++  const bool autoMask = !hasFlag(argc, argv, "--no-automask");
++  // The records travel on stdin and on the stdout the caller gave; anything printed from here on goes to stderr.
++  fflush(stdout);
++  const int inFd = _fileno(stdin), outFd = _dup(_fileno(stdout));
++  if (outFd < 0 || _dup2(_fileno(stderr), _fileno(stdout)) != 0) throw std::runtime_error("cannot set up the binary stdout");
++  _setmode(inFd, _O_BINARY);
++  _setmode(outFd, _O_BINARY);
++  const auto started = std::chrono::steady_clock::now();
++
++  vk::Context context;
++  fprintf(stderr, "device: %s\n", context.deviceName().c_str());
++  nr::Model model(context, modelDir, !hasFlag(argc, argv, "--no-verify"));
++  const nr::Tensor& blend = model.tensor(70, 0, "blend_scale");   // one f16, read as runRun reads it
++  const float blendScale = blend.byteLength >= 2 ? num::f16ToF32((uint16_t)(blend.bytes[0] | (blend.bytes[1] << 8))) : 1.0f;
++  fprintf(stderr, "blend scale %g\n", blendScale);
++  nr::Kernels kernels(context, shaderDir);
++  kernels.setSiluTable(ref::siluTable());
++  nr::Geometry geometry = nr::Geometry::fromValid(width, height);
++  const uint32_t fullRows = geometry.fullWidth * geometry.fullHeight;
++  nr::Activation features;
++  features.format = nr::Format::F32; features.rows = fullRows; features.channels = 16; features.allocRows = nr::alignRows(fullRows);
++  features.label = "input features";
++  features.buffer = context.createBuffer((VkDeviceSize)features.allocRows * 16 * 4, false, "input features");
++  context.fillZero(features.buffer);   // preprocess writes every row of the field; the alignment rows stay zero
++  nr::Graph::Options options;
++  options.captureBoundaries = false;
++  options.fusedBlocks = fusedBlocksEnabled();
++  nr::Graph graph(context, model, kernels, geometry, options);
++
++  const size_t pixels = (size_t)width * height, rgbBytes = pixels * 3, motionBytes = pixels * 4;
++  const uint32_t groups = ((width + 7) / 8) * ((height + 7) / 8);
++  const size_t statsBytes = (2 + (size_t)groups * 2) * 4;
++  const std::vector<float> proxyTable = streamProxyTable();
++  const std::vector<uint8_t> backTable = streamBackTable();
++  const std::vector<float> weightTable = streamWeightTable(blendScale);
++  vk::Buffer proxyTableBuffer = context.createBuffer(proxyTable.size() * 4, false, "8-bit -> proxy table");
++  vk::Buffer backTableBuffer = context.createBuffer(4100, false, "proxy -> 8-bit table");
++  vk::Buffer weightTableBuffer = context.createBuffer(weightTable.size() * 4, false, "blend weight table");
++  context.upload(proxyTableBuffer, proxyTable.data(), proxyTable.size() * 4);
++  context.upload(backTableBuffer, backTable.data(), backTable.size());
++  context.upload(weightTableBuffer, weightTable.data(), weightTable.size() * 4);
++  vk::Buffer frameBuffer = context.createBuffer(rgbBytes, false, "stream frame");
++  vk::Buffer motionBuffer = context.createBuffer(motionBytes, false, "stream motion");
++  vk::Buffer proxyBuffer = context.createBuffer(pixels * 16, false, "proxy");
++  vk::Buffer warpedBuffer = context.createBuffer(pixels * 16, false, "warped history");
++  vk::Buffer historyBuffer = context.createBuffer(pixels * 12, false, "history");
++  vk::Buffer outputBuffer = context.createBuffer(rgbBytes, false, "stream output");
++  vk::Buffer statsBuffer = context.createBuffer(statsBytes, false, "stream stats");
++  context.fillZero(warpedBuffer);
++  context.fillZero(historyBuffer);
++  auto load = [&](const char* name) {
++    return context.createComputePipeline(context.loadShaderModule(shaderDir + "/" + name + ".spv"), {}, name, 0);
++  };
++  vk::Pipeline unpackPipeline = load("stream_unpack"), warpPipeline = load("stream_warp");
++  vk::Pipeline injectPipeline = load("stream_inject"), compositePipeline = load("stream_composite");
++
++  // The frames in flight. A reader thread fills `inputs` ahead of the GPU (frame n in inputs[n % 3], free again once its
++  // frame's fence says the GPU has copied it), a writer thread drains `readbacks` (frame n's 8-bit frame in readbacks[n % 3],
++  // free again once it is on stdout), and this thread only records, submits and checks, two frames on the GPU (frame n in
++  // slots[n % 2], its descriptor sets in the context's pool n % 2).
++  constexpr int kInputs = 3, kReadbacks = 3, kSlots = 2;
++  struct Input {
++    vk::Buffer upload;
++    StreamFrameHeader header{};
++  } inputs[kInputs];
++  vk::Buffer readbacks[kReadbacks];
++  struct Slot {
++    VkCommandBuffer commands = VK_NULL_HANDLE;
++    VkFence fence = VK_NULL_HANDLE;
++    VkQueryPool queries = VK_NULL_HANDLE;
++    bool temporal = false;
++    int64_t frame = -1;   // the frame it holds; -1: none
++  } slots[kSlots];
++  for (Input& input : inputs) input.upload = streamHostBuffer(context, rgbBytes + motionBytes, false, "stream upload");
++  for (vk::Buffer& readback : readbacks) readback = streamHostBuffer(context, rgbBytes + statsBytes, true, "stream readback");
++  VkCommandPool commandPool = VK_NULL_HANDLE;
++  VkCommandPoolCreateInfo poolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
++  poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++  poolInfo.queueFamilyIndex = context.queueFamily();
++  VK_CHECK(vkCreateCommandPool(context.device(), &poolInfo, nullptr, &commandPool));
++  for (Slot& slot : slots) {
++    VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
++    allocate.commandPool = commandPool;
++    allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++    allocate.commandBufferCount = 1;
++    VK_CHECK(vkAllocateCommandBuffers(context.device(), &allocate, &slot.commands));
++    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
++    VK_CHECK(vkCreateFence(context.device(), &fenceInfo, nullptr, &slot.fence));
++    slot.queries = context.createTimestampPool(4);
++  }
++
++  // One recording of the network before the first frame: its pipelines and weights are made on first use.
++  {
++    context.resetDescriptorPool();
++    VkCommandBuffer commands = context.beginCommands();
++    graph.record(commands, features);
++    context.endAndSubmit(commands, true);
++    checkChainTimeouts(kernels);
++  }
++
++  // A frame: the upload's bytes to the GPU, the proxy and the features, the warp and lanes 7-9 when it is temporal, the
++  // network, the composite (history and 8-bit frame), the frame back to the readback buffer.
++  auto recordFrame = [&](Slot& slot, const vk::Buffer& upload, const vk::Buffer& readback, uint32_t seed, uint32_t flags) {
++    VkCommandBuffer commands = slot.commands;
++    VK_CHECK(vkResetCommandBuffer(commands, 0));
++    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++    VK_CHECK(vkBeginCommandBuffer(commands, &begin));
++    vkCmdResetQueryPool(commands, slot.queries, 0, 4);
++    // after all of the previous frame (its history, its output's copy)
++    streamBarrier(commands, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
++                  VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT);
++    vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, slot.queries, 0);
++    const VkBufferCopy frameCopy{0, 0, rgbBytes};
++    vkCmdCopyBuffer(commands, upload.buffer, frameBuffer.buffer, 1, &frameCopy);
++    if (slot.temporal) {
++      const VkBufferCopy motionCopy{rgbBytes, 0, motionBytes};
++      vkCmdCopyBuffer(commands, upload.buffer, motionBuffer.buffer, 1, &motionCopy);
++    }
++    vkCmdFillBuffer(commands, statsBuffer.buffer, 0, VK_WHOLE_SIZE, 0);
++    context.transferBarrier(commands);
++    {
++      const uint32_t push[2] = {width, height};
++      const vk::Buffer* bindings[vk::kGenericBindings] = {};
++      bindings[0] = &frameBuffer; bindings[1] = &proxyTableBuffer; bindings[7] = &proxyBuffer;
++      streamDispatch(context, commands, unpackPipeline, bindings, push, sizeof(push), width, height);
++    }
++    const nr::Kernels::PreprocessArgs preprocess{geometry.fullWidth, geometry.fullHeight, width, height, width, height, seed,
++                                                 autoMask, tone, structure, skin, style};
++    kernels.preprocessFromProxy(commands, proxyBuffer, features, preprocess);
++    if (slot.temporal) {
++      {
++        const uint32_t push[3] = {width, height, flags};
++        const vk::Buffer* bindings[vk::kGenericBindings] = {};
++        bindings[0] = &motionBuffer; bindings[1] = &historyBuffer; bindings[2] = &warpedBuffer;
++        streamDispatch(context, commands, warpPipeline, bindings, push, sizeof(push), width, height);
++      }
++      const uint32_t push[4] = {width, height, geometry.fullWidth, geometry.fullHeight};
++      const vk::Buffer* bindings[vk::kGenericBindings] = {};
++      bindings[2] = &warpedBuffer; bindings[7] = &features.buffer;
++      streamDispatch(context, commands, injectPipeline, bindings, push, sizeof(push), geometry.fullWidth, geometry.fullHeight);
++    }
++    vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.queries, 1);
++    graph.record(commands, features);
++    vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.queries, 2);
++    context.computeBarrier(commands);
++    {
++      const uint32_t push[4] = {width, height, geometry.fullWidth, slot.temporal ? 1u : 0u};
++      const vk::Buffer* bindings[vk::kGenericBindings] = {};
++      bindings[0] = &graph.head().buffer; bindings[1] = &proxyBuffer; bindings[2] = &warpedBuffer; bindings[3] = &weightTableBuffer;
++      bindings[4] = &backTableBuffer; bindings[5] = &historyBuffer; bindings[6] = &outputBuffer; bindings[8] = &statsBuffer;
++      streamDispatch(context, commands, compositePipeline, bindings, push, sizeof(push), width, height);
++    }
++    context.transferBarrier(commands);
++    const VkBufferCopy outputCopy{0, 0, rgbBytes}, statsCopy{0, rgbBytes, statsBytes};
++    vkCmdCopyBuffer(commands, outputBuffer.buffer, readback.buffer, 1, &outputCopy);
++    vkCmdCopyBuffer(commands, statsBuffer.buffer, readback.buffer, 1, &statsCopy);
++    streamBarrier(commands, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
++                  VK_ACCESS_2_HOST_READ_BIT);
++    vkCmdWriteTimestamp(commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, slot.queries, 3);
++    VK_CHECK(vkEndCommandBuffer(commands));
++    VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
++    submit.commandBufferCount = 1;
++    submit.pCommandBuffers = &commands;
++    VK_CHECK(vkQueueSubmit(context.queue(), 1, &submit, slot.fence));
++  };
++
++  std::vector<uint8_t> hello(kStreamHelloBytes, 0);
++  const uint32_t helloHead[4] = {kStreamHello, kStreamVersion, width, height};
++  memcpy(hello.data(), helloHead, 16);
++  memcpy(hello.data() + 16, proxyTable.data(), 256 * 4);
++  memcpy(hello.data() + 16 + 256 * 4, backTable.data(), backTable.size());
++  streamWrite(outFd, hello.data(), hello.size());
++  fprintf(stderr, "stream ready in %.2f s: %ux%u (field %ux%u, %s), %zu-byte frames\n", millisecondsSince(started) / 1000.0, width,
++          height, geometry.fullWidth, geometry.fullHeight, graph.chained() ? "chained" : "barriers", rgbBytes);
++
++  // What the three threads share, under `mutex`: how far the reader is (inputsRead), which inputs it may fill (frames
++  // below inputsFree), how far the GPU's frames are checked (framesChecked: the writer's frames) and written.
++  std::mutex mutex;
++  std::condition_variable changed;
++  int64_t inputsRead = 0, inputsFree = kInputs, framesChecked = 0, framesWritten = 0;
++  bool inputEnded = false, allChecked = false, stopping = false;
++  std::exception_ptr failure;
++  std::chrono::steady_clock::time_point firstFrame, lastWritten;
++  auto fail = [&](std::exception_ptr error) {
++    std::lock_guard<std::mutex> lock(mutex);
++    if (!failure) failure = error;
++    stopping = true;
++    changed.notify_all();
++  };
++  std::thread reader([&] {
++    try {
++      for (int64_t frame = 0;; ++frame) {
++        {
++          std::unique_lock<std::mutex> lock(mutex);
++          changed.wait(lock, [&] { return stopping || frame < inputsFree; });
++          if (stopping) return;
++        }
++        Input& input = inputs[frame % kInputs];
++        StreamFrameHeader header;
++        const bool more = streamRead(inFd, &header, sizeof(header), "a frame header", true);
++        if (more) {
++          if (header.magic != kStreamFrame) throw std::runtime_error("stdin: a frame record does not start with NRF1");
++          streamRead(inFd, input.upload.mapped, rgbBytes, "a frame", false);
++          if (header.flags & kStreamMotion)
++            streamRead(inFd, static_cast<uint8_t*>(input.upload.mapped) + rgbBytes, motionBytes, "a frame's motion", false);
++        }
++        std::lock_guard<std::mutex> lock(mutex);
++        if (more) {
++          input.header = header;
++          ++inputsRead;
++        } else {
++          inputEnded = true;
++        }
++        changed.notify_all();
++        if (!more) return;
++      }
++    } catch (...) {
++      fail(std::current_exception());
++    }
++  });
++  std::thread writer([&] {
++    try {
++      for (int64_t frame = 0;; ++frame) {
++        {
++          std::unique_lock<std::mutex> lock(mutex);
++          changed.wait(lock, [&] { return stopping || frame < framesChecked || allChecked; });
++          if (stopping || frame >= framesChecked) return;
++        }
++        streamWrite(outFd, readbacks[frame % kReadbacks].mapped, rgbBytes);
++        std::lock_guard<std::mutex> lock(mutex);
++        framesWritten = frame + 1;
++        lastWritten = std::chrono::steady_clock::now();
++        changed.notify_all();
++      }
++    } catch (...) {
++      fail(std::current_exception());
++    }
++  });
++
++  int frames = 0, temporalFrames = 0;
++  double networkMs = 0, gpuMs = 0, weightSum = 0, recordMs = 0, inputWaitMs = 0, outputWaitMs = 0, gpuWaitMs = 0;
++  size_t weightCount = 0;
++  // The frame a slot holds, done: wait for the GPU, check it, free its input for the reader, hand it to the writer.
++  auto checkFrame = [&](Slot& slot) {
++    const auto waitStart = std::chrono::steady_clock::now();
++    VK_CHECK(vkWaitForFences(context.device(), 1, &slot.fence, VK_TRUE, UINT64_MAX));
++    gpuWaitMs += millisecondsSince(waitStart);
++    VK_CHECK(vkResetFences(context.device(), 1, &slot.fence));
++    checkChainTimeouts(kernels);
++    const std::vector<double> stamps = context.readTimestampsMs(slot.queries, 4);
++    networkMs += stamps[2] - stamps[1];
++    gpuMs += stamps[3] - stamps[0];
++    const uint32_t* stats =
++        reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(readbacks[slot.frame % kReadbacks].mapped) + rgbBytes);
++    if (stats[0])
++      throw std::runtime_error(std::to_string(stats[0]) + " head logits off the half grid: the composite's weight table does not apply");
++    if (slot.temporal)
++      for (uint32_t group = 0; group < groups; ++group) {
++        float sum;
++        memcpy(&sum, &stats[2 + 2 * group], 4);
++        weightSum += sum;
++        weightCount += stats[3 + 2 * group];
++      }
++    std::lock_guard<std::mutex> lock(mutex);
++    framesChecked = slot.frame + 1;
++    inputsFree = slot.frame + 1 + kInputs;
++    slot.frame = -1;
++    changed.notify_all();
++  };
++  // Stop the I/O threads: joined when they are done, left behind (the process is ending) after a failure.
++  auto endThreads = [&](bool join) {
++    {
++      std::lock_guard<std::mutex> lock(mutex);
++      allChecked = true;
++      if (!join) stopping = true;
++      changed.notify_all();
++    }
++    for (std::thread* thread : {&reader, &writer})
++      if (thread->joinable()) join ? thread->join() : thread->detach();
++  };
++  try {
++    bool haveHistory = false;
++    for (int64_t frame = 0;; ++frame) {
++      Slot& slot = slots[frame % kSlots];
++      if (slot.frame >= 0) checkFrame(slot);   // two frames back
++      {
++        std::unique_lock<std::mutex> lock(mutex);
++        auto waitStart = std::chrono::steady_clock::now();
++        changed.wait(lock, [&] { return stopping || frame < inputsRead || inputEnded; });
++        if (stopping) std::rethrow_exception(failure);
++        if (frame >= inputsRead) break;   // the end of the stream
++        if (frame) inputWaitMs += millisecondsSince(waitStart);   // (before the first frame: the caller's start-up)
++        else firstFrame = std::chrono::steady_clock::now();
++        waitStart = std::chrono::steady_clock::now();
++        changed.wait(lock, [&] { return stopping || frame - framesWritten < kReadbacks; });   // its readback is free
++        if (stopping) std::rethrow_exception(failure);
++        outputWaitMs += millisecondsSince(waitStart);
++      }
++      const Input& input = inputs[frame % kInputs];
++      // as runRun: with motion and no reset, the previous published frame is the history
++      slot.temporal = haveHistory && (input.header.flags & kStreamMotion) && !(input.header.flags & kStreamReset);
++      const auto recordStart = std::chrono::steady_clock::now();
++      context.resetDescriptorPool((uint32_t)(frame % kSlots));
++      recordFrame(slot, input.upload, readbacks[frame % kReadbacks], input.header.seed,
++                  input.header.flags & (kStreamNegateX | kStreamNegateY));
++      recordMs += millisecondsSince(recordStart);
++      slot.frame = frame;
++      haveHistory = true;
++      if (slot.temporal) ++temporalFrames;
++      ++frames;
++    }
++    for (int k = 0; k < kSlots; ++k) {   // the last frames, in order
++      Slot& slot = slots[(frames + k) % kSlots];
++      if (slot.frame >= 0) checkFrame(slot);
++    }
++  } catch (...) {
++    endThreads(false);
++    throw;
++  }
++  endThreads(true);
++  if (failure) std::rethrow_exception(failure);
++  const double seconds = frames ? std::chrono::duration<double>(lastWritten - firstFrame).count() : 0.0;
++  fprintf(stderr, "streamed %d frame%s at %ux%u (field %ux%u, %s): network %.3f ms a frame, the GPU %.3f ms a frame in all; %d with "
++          "history, mean weight %.3f; %.1f frames a second through the program; a frame took %.1f ms to record, waited %.1f ms "
++          "for its input, %.1f for the GPU, %.1f for stdout to take an earlier one\n", frames, frames == 1 ? "" : "s", width, height,
++          geometry.fullWidth, geometry.fullHeight, graph.chained() ? "chained" : "barriers", frames ? networkMs / frames : 0.0,
++          frames ? gpuMs / frames : 0.0, temporalFrames, weightCount ? weightSum / (double)weightCount : 0.0,
++          seconds > 0 ? frames / seconds : 0.0, frames ? recordMs / frames : 0.0, frames ? inputWaitMs / frames : 0.0,
++          frames ? gpuWaitMs / frames : 0.0, frames ? outputWaitMs / frames : 0.0);
++
++  context.waitIdle();
++  for (Slot& slot : slots) {
++    vkDestroyQueryPool(context.device(), slot.queries, nullptr);
++    vkDestroyFence(context.device(), slot.fence, nullptr);
++  }
++  for (Input& input : inputs) context.destroyBuffer(input.upload);
++  for (vk::Buffer& readback : readbacks) context.destroyBuffer(readback);
++  vkDestroyCommandPool(context.device(), commandPool, nullptr);
++  for (vk::Pipeline* pipeline : {&unpackPipeline, &warpPipeline, &injectPipeline, &compositePipeline}) context.destroyPipeline(*pipeline);
++  for (vk::Buffer* buffer : {&proxyTableBuffer, &backTableBuffer, &weightTableBuffer, &frameBuffer, &motionBuffer, &proxyBuffer,
++                             &warpedBuffer, &historyBuffer, &outputBuffer, &statsBuffer, &features.buffer})
++    context.destroyBuffer(*buffer);
++  _close(outFd);
++  return 0;
++}
++
+ int runCommand(int argc, char** argv) {
++  if (argc >= 2 && !strcmp(argv[1], "run")) return hasFlag(argc, argv, "--stream") ? runStream(argc, argv) : runRun(argc, argv);
+   if (argc >= 2 && !strcmp(argv[1], "verify")) return runVerify(argc, argv);
+   if (argc >= 2 && !strcmp(argv[1], "shaderinfo")) return runShaderInfo(argc, argv);
+   if (argc >= 2 && !strcmp(argv[1], "profile")) return runProfile(argc, argv);

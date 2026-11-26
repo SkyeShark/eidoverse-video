@@ -17,6 +17,14 @@ to distinguish missing scene APIs from internal implementation functions.
 | [contact_sheet.py](../contact_sheet.py) | CLI utility: labelled contact sheets of a video: a grid, or `--lines` (a row per line with its frames and the sound's spectrogram) | [render-review](../tools-guides/render-review.md) |
 | [cyborg_stutter.py](../cyborg_stutter.py) | CLI utility | [audio](../tools-guides/audio.md) |
 | [cyborg_voice.py](../cyborg_voice.py) | CLI utility | [audio](../tools-guides/audio.md) |
+| [dlss5nr/dlss5nr.py](../dlss5nr/dlss5nr.py) | Host CLI: DLSS 5 neural rendering over a finished film, one stream through OpenDLSS-NR (Windows, NVIDIA Ada or newer, weights you supply) | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/build.py](../dlss5nr/build.py) | Host CLI: OpenDLSS-NR cloned at its pinned commit, the stream patch applied, `dlss5vk.exe` built with upstream's scripts | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/motion_check.py](../dlss5nr/motion_check.py) | CLI: which reading of a motion source points to the previous frame, decided on the film | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/flow_motion.py](../dlss5nr/flow_motion.py) | CLI: motion files from optical flow (OpenCV), for films without motion vectors | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/flicker.py](../dlss5nr/flicker.py) | CLI: a re-rendered film's frame-to-frame flicker against its input | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/motion_npz.py](../dlss5nr/motion_npz.py) | Python module: the motion-file layout (save, load, raw planes, conventions) | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/patch/](../dlss5nr/patch/NOTICE) | Third-party patch: OpenDLSS-NR's `run --list` / `run --stream` (`opendlss_stream.diff`) and the stream's compute shaders, with upstream's MIT `LICENSE` and `NOTICE` | [postprocessing](../tools-guides/postprocessing.md) |
+| [dlss5nr/tests/test_dlss5nr.py](../dlss5nr/tests/test_dlss5nr.py) | Test suite: the DLSS 5 tools without a GPU (the stand-in program `fake_dlss5vk.py`); the real network when it is built and given weights | [postprocessing](../tools-guides/postprocessing.md) |
 | [eido.py](../eido.py) | CLI utility | [scene-format](../tools-guides/scene-format.md) |
 | [eidoverse/assets/animations/performance_src/](../eidoverse/assets/animations/performance_src/README.md) | Asset source: Blender VRMA authoring script + engine-free clip checker | [blender](../tools-guides/blender.md) |
 | [eidoverse/assets/animations/performance_uf_src/](../eidoverse/assets/animations/performance_uf_src/README.md) | Asset source: Blender VRMA authoring script, mesh-aware clip checker and rig data (UNKNOWN FORCE clips) | [blender](../tools-guides/blender.md) |
@@ -87,6 +95,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/finishing/song.py](../eidoverse/examples/finishing/song.py) | Worked example: a sung phrase made from scratch and its mouth from the vocal stem | [audio](../tools-guides/audio.md) |
 | [eidoverse/examples/finishing/scene.js](../eidoverse/examples/finishing/scene.js) | Worked example: the sona sings on a stage, its mouth from the stem | [audio](../tools-guides/audio.md) |
 | [eidoverse/examples/finishing/finish.py](../eidoverse/examples/finishing/finish.py) | Example CLI: a rendered film through the finishing chain (merge, clock, print, line sheet) | [postprocessing](../tools-guides/postprocessing.md) |
+| [eidoverse/examples/motion_vectors/scene.js](../eidoverse/examples/motion_vectors/scene.js) | Scene example: the runner's motion output (`"motionVectors"`), checked by `check.py` (files, convention, an unchanged picture) | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/obstacle_course.js](../eidoverse/examples/obstacle_course.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/assembly.scene.js](../eidoverse/examples/robotics/assembly.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/mantis.scene.js](../eidoverse/examples/robotics/mantis.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
@@ -115,6 +124,8 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/loft.js](../eidoverse/loft.js) | Injected scene API | [geometry](../tools-guides/geometry.md) |
 | [eidoverse/lyric_renderer.py](../eidoverse/lyric_renderer.py) | Optional Python frame utility; no CLI | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [eidoverse/model_kit.js](../eidoverse/model_kit.js) | Injected scene API | [assets](../tools-guides/assets.md) |
+| [eidoverse/motion_vectors.js](../eidoverse/motion_vectors.js) | Native runner support: three's velocity as the auto-enhance pass's motion attachment, written as DLSS 5 motion files (`"motionVectors"` in scene.json) | [postprocessing](../tools-guides/postprocessing.md) |
+| [eidoverse/motion_vectors_test.mjs](../eidoverse/motion_vectors_test.mjs) | Test suite | [development](../tools-guides/development.md) |
 | [eidoverse/parallax_material.js](../eidoverse/parallax_material.js) | ESM installer for injected scene API | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
 | [eidoverse/parallax_occlusion.js](../eidoverse/parallax_occlusion.js) | System support; see guide for entry point | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
 | [eidoverse/parole.js](../eidoverse/parole.js) | Dynamic ESM scene API: parole-in-libertà captions and quotes | [motion-graphics](../tools-guides/motion-graphics.md) |
@@ -305,7 +316,10 @@ this audit or a count of robot parts. The inspector HTML entry point is included
 
 The scan includes first-party JS/MJS, Python and HTML entry points, and checks
 for other script/shader extensions. Vendored Three.js, N8AO, PDF.js and polygon-clipping are
-dependencies, not separately authored tools. `book_core.pre_astra.js` is a
+dependencies, not separately authored tools. `dlss5nr/patch/` is a patch to a
+third party's program (a diff and the GLSL compute shaders `build.py` copies into
+its clone), listed once by its notice; upstream's MIT `LICENSE` and `NOTICE` stay
+beside it. `book_core.pre_astra.js` is a
 source snapshot. An asset's `<name>_src/` folder holds the scripts that authored that asset
 (mostly Blender, run through `run_blender.sh`); each folder is listed once, by its
 README, rather than script by script. Ignored working projects, `ASTRA_NOTES*.md` session notes,

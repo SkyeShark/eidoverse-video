@@ -1,0 +1,82 @@
+#version 460
+// `run --stream`: the published frame, as runRun composes it on the CPU: the head's residual on the centred proxy,
+// clamped; where the frame is temporal and the pixel has a history, blended toward the warped history by the head's
+// own weight, sigmoid(logit) x blend_scale clamped to [0, 1] (read from a table of runRun's expression for every half
+// the logit can be: the head is on the half grid); truncated to the half grid. That is both the next history (kept
+// here, on the GPU) and, through BACK_LUT (the shoulder undone and sRGB at the nearest 1/4096), the 8-bit frame that
+// goes back to the caller.
+#extension GL_EXT_shader_explicit_arithmetic_types : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_GOOGLE_include_directive : require
+#include "stream_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(push_constant) uniform Push {
+  uint width;
+  uint height;
+  uint fullWidth;
+  uint temporal;   // this frame blends with its history
+} pc;
+
+layout(std430, binding = 0) readonly buffer Head { float head[]; };            // f32 [fullHeight][fullWidth][4]
+layout(std430, binding = 1) readonly buffer Proxy { vec4 proxy[]; };           // [height][width] RGBA f32
+layout(std430, binding = 2) readonly buffer Warped { vec4 warped[]; };         // [height][width]: RGB, alpha 1 with a history
+layout(std430, binding = 3) readonly buffer Weights { float weightTable[]; };  // [65536] by the logit's half bits
+layout(std430, binding = 4) readonly buffer Back { uint8_t backTable[]; };     // [4097] proxy code at i / 4096 -> 8-bit sRGB
+layout(std430, binding = 5) writeonly buffer History { float history[]; };     // [height][width][3] the published frame
+layout(std430, binding = 6) writeonly buffer Frame { uint8_t rgb[]; };         // [height][width][3] 8-bit sRGB
+layout(std430, binding = 8) buffer Stats { uint stats[]; };                    // [0] logits off the half grid; per workgroup: weight sum, count
+
+shared float sums[64];
+shared uint counts[64];
+
+void main() {
+  const uvec2 id = gl_GlobalInvocationID.xy;
+  const uint local = gl_LocalInvocationIndex;
+  float weightSum = 0.0;
+  uint weightCount = 0u;
+  if (id.x < pc.width && id.y < pc.height) {
+    const uint pixel = id.y * pc.width + id.x, h = (id.y * pc.fullWidth + id.x) * 4u;
+    const vec4 previous = warped[pixel];
+    const bool blendHere = pc.temporal != 0u && previous.a > 0.5;
+    float weight = 0.0;
+    if (blendHere) {
+      const float logit = head[h + 3u];
+      if (roundF16(logit) != logit && !isnan(logit)) atomicAdd(stats[0], 1u);   // the table would not apply
+      weight = weightTable[truncateHalfBits(logit)];
+      weightSum = weight;
+      weightCount = 1u;
+    }
+    const vec4 values = proxy[pixel];
+    for (uint c = 0u; c < 3u; ++c) {
+      precise float centred = fma(values[c], 0.125, -0.0625);
+      precise float inner = fma(head[h + c], 0.03125, centred);
+      precise float lifted = inner * 8.0 + 0.5;
+      precise float neural = min(max(lifted, 0.0), 1.0);
+      if (blendHere) {
+        precise float towards = previous[c] - neural;
+        neural = fma(weight, towards, neural);
+      }
+      const float published = truncateHalf(neural);
+      history[pixel * 3u + c] = published;
+      precise float index = clamp(published, 0.0, 1.0) * 4096.0 + 0.5;   // the host's (clip(out, 0, 1) * 4096 + 0.5).astype(int32)
+      rgb[pixel * 3u + c] = backTable[uint(int(index))];
+    }
+  }
+  sums[local] = weightSum;
+  counts[local] = weightCount;
+  barrier();
+  for (uint stride = 32u; stride > 0u; stride >>= 1u) {
+    if (local < stride) {
+      sums[local] += sums[local + stride];
+      counts[local] += counts[local + stride];
+    }
+    barrier();
+  }
+  if (local == 0u) {
+    const uint group = gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x;
+    stats[2u + 2u * group] = floatBitsToUint(sums[0]);
+    stats[3u + 2u * group] = counts[0];
+  }
+}

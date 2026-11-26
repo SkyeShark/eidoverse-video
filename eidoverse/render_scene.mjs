@@ -111,6 +111,12 @@ const __loopFrames = __capture
     : null;
 const __nLoop = __loopFrames ? __loopFrames.length : totalFrames;
 
+// MOTION VECTORS (config "motionVectors": "<dir>"): the auto-enhance scene pass carries three's velocity as one more
+// attachment, and every frame's is written as <dir>/<frame:04d>.npz, the motion files of DLSS 5's temporal path
+// (eidoverse/motion_vectors.js; tools-guides/postprocessing.md, "DLSS 5 over a finished film").
+const __motionDir = typeof config.motionVectors === 'string' && config.motionVectors ? config.motionVectors : null;
+globalThis.__motionVectorsRequested = !!__motionDir;
+
 const outputVideo = config.outputVideo || config.composedOutput
     || (config.outputDir || './scene') + '.mp4';
 __auditOutBase = outputVideo;
@@ -2028,10 +2034,14 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
             // transparent's G-buffer contribution by its visibility and
             // opaques hard-write as before.
             const auxAlpha = diffuseColor ? diffuseColor.a : 1;
+            // "motionVectors": three's velocity as one more attachment, in pixels (motion_vectors.js)
+            const motion = globalThis.__motionVectorsRequested
+                ? { velocity: (await import('./motion_vectors.js')).velocityAttachment(THREE, auxAlpha) } : {};
             const sceneMRT = mrt({
                 output: outputNode_,
                 normal: vec4(directionToColor(normalView), auxAlpha),
                 metalrough: vec4(metalness, roughness, 0, auxAlpha),
+                ...motion,
             });
             // G-buffer attachments default to NoBlending: a transparent quad
             // REPLACES the normal/metalrough underneath over its full
@@ -2045,8 +2055,10 @@ async function applyAutoEnhanceTSL(renderer, scene, camera) {
             if (sceneMRT.setBlendMode && THREE.MaterialBlending !== undefined) {
                 sceneMRT.setBlendMode('normal', { blending: THREE.MaterialBlending });
                 sceneMRT.setBlendMode('metalrough', { blending: THREE.MaterialBlending });
+                if (motion.velocity) sceneMRT.setBlendMode('velocity', { blending: THREE.MaterialBlending });
             }
             scenePass.setMRT(sceneMRT);
+            if (motion.velocity) globalThis.__motionScenePass = scenePass;
         }
         const sceneColor = scenePass.getTextureNode('output');
         const sceneDepth = scenePass.getTextureNode('depth');
@@ -2659,6 +2671,24 @@ if (_guardRenderer && typeof _guardRenderer.render === 'function') {
     _guardRenderer.render = function (s, c) { _frameRenderCount++; return _origGuardR(s, c); };
 }
 
+// The motion files ("motionVectors"): read from the scene pass after each frame's render, never for stills.
+let __motionWriter = null;
+if (__motionDir) {
+    if (__capture) {
+        console.log('[motion] stills (--at): no motion files are written');
+    } else if (globalThis.__motionScenePass && _guardRenderer) {
+        const { createMotionVectorWriter } = await import('./motion_vectors.js');
+        __motionWriter = createMotionVectorWriter({ renderer: _guardRenderer, pass: globalThis.__motionScenePass,
+                                                    dir: __motionDir, width, height });
+        console.log(`[motion] three's velocity -> ${__motionDir}/<frame>.npz (dlss5nr.py: --convention "+X -Y" --offset 0)`);
+    } else {
+        const why = 'motionVectors needs the auto-enhance scene pass, which this scene runs without: no motion files '
+            + 'were written (dlss5nr/flow_motion.py makes them from the film)';
+        console.warn(`[motion] ⚠ ${why}`);
+        __ledger.record({ check: 'motion_vectors', outcome: 'WARN', class: 'CORRECTNESS', message: why });
+    }
+}
+
 // --- Render loop ---
 console.log(__capture
     ? `[render_scene] Capturing ${__capture.frames.length} frame(s) [${__capture.frames.join(', ')}] of ${totalFrames} at ${width}x${height} @ ${fps}fps` +
@@ -3151,6 +3181,7 @@ for (let __k = 0; __k < __nLoop; __k++) {
             if (_guardRenderer && _gs && _gc) await _guardRenderer.renderAsync(_gs, _gc);
         } catch (e) { console.warn('[render_scene] fallback render failed:', e.message); }
     }
+    if (__motionWriter) await __motionWriter.capture(i);
 
     // Pipelined readback: returns the PREVIOUS frame's data while the
     // current frame's GPU copy starts in parallel. First call returns
@@ -3176,6 +3207,12 @@ for (let __k = 0; __k < __nLoop; __k++) {
 // Drain the last in-flight readback so the final frame is written.
 const finalData = await drainReadback(harness);
 if (finalData) await ffmpeg.write(finalData);
+if (__motionWriter) {
+    const m = await __motionWriter.close();
+    const msg = `${m.frames} of ${totalFrames} frames' motion files (${(m.bytes / 1e6).toFixed(1)} MB) in ${__motionDir}`;
+    console.log(`[motion] ${msg}`);
+    __ledger.record({ check: 'motion_vectors', outcome: m.frames === totalFrames ? 'PASS' : 'WARN', class: 'INFO', message: msg });
+}
 
 // PRE-CLEANUP AUDIT SNAPSHOT (review findings 11, 14): capture the framing
 // evidence and the TOCTOU diff from the scene AS RENDERED, before cleanup()

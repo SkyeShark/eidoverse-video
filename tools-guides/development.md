@@ -77,6 +77,8 @@ checks and inspect appropriate probe frames/motion. Use the available suites:
 deno test --no-check --allow-read --allow-env --node-modules-dir=manual --no-lock eidoverse/robotics/tests/runtime_test.mjs
 deno test --no-check --allow-read --node-modules-dir=manual --no-lock eidoverse/audit_core_test.mjs
 deno test --no-check --allow-read --node-modules-dir=manual --no-lock eidoverse/dismember_core_test.mjs
+deno test --no-check --allow-read --node-modules-dir=manual --no-lock eidoverse/motion_vectors_test.mjs
+python dlss5nr/tests/test_dlss5nr.py      # the DLSS 5 tools, no GPU (needs ffmpeg; OpenCV for the flow checks)
 ```
 
 Read a test's imports/permissions when extending it. `--no-check` bypasses

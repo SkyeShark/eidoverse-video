@@ -37,6 +37,10 @@ deno/ffmpeg/deps; `python eido.py bootstrap` fetches them the first time.
 sets, VRMs, audio. Declare only what the scene uses; there is no required
 set.
 
+`"motionVectors": "work/<id>/motion"` (optional) also writes every frame's
+motion vectors there, for DLSS 5's temporal path over the finished film
+([post-processing](postprocessing.md#dlss-5-over-a-finished-film)).
+
 **Asset injection is raw bytes.** Point each asset at the real file —
 `hdri.hdr`, `model_embedded.gltf`, `character.vrm`, `image.png` — not a
 `*_b64.txt` sidecar. The engine reads the file and puts a `Uint8Array`

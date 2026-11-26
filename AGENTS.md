@@ -116,7 +116,7 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Cloth](tools-guides/cloth.md) | Fabric panels, pinning, wind, collisions and settling. |
 | [Particles and morphing](tools-guides/particles-fx.md) | Sprite effects and mesh/text/point-cloud transitions. |
 | [SDFs and isosurfaces](tools-guides/sdf-volumes.md) | Placeable raymarched surfaces, volume effects and voxel scalar fields. |
-| [Post-processing effects](tools-guides/postprocessing.md) | Effect registry, parameters, animated uniforms, compositing, the era looks (print, CRT, film and paint), the Futurist aeropittura painting pass, and the release print a finished film gets last (`film_print.py`). |
+| [Post-processing effects](tools-guides/postprocessing.md) | Effect registry, parameters, animated uniforms, compositing, the era looks (print, CRT, film and paint), the Futurist aeropittura painting pass, DLSS 5 neural rendering over a finished film (a Windows + NVIDIA host tool, with the runner's motion vectors), and the release print a finished film gets last (`film_print.py`). |
 | [Motion graphics, screens and text](tools-guides/motion-graphics.md) | Titles, subtitles, parole-in-libertà lyric captions and quotes, overlays, screen UI, computing-history screen scenes, video atlases and 3D type. |
 | [Cameras and lighting](tools-guides/camera-lighting.md) | Framing, safe camera travel, focus targets, shadows and physical lighting. |
 | [Placement and assembly checks](tools-guides/placement.md) | Contact, scale, orientation, vehicle paths, clipping, hovering and z-fighting. |
