@@ -22,6 +22,7 @@ and whole enclosed sets.
 | UNKNOWN FORCE: a night megacity round a sunken well, a quiet room, a showroom, a gold corridor, a data centre, a race on an elevated highway and a canyon of paper | [`eidoverse/sets/unknown_force/`](../eidoverse/sets/unknown_force/README.md) (14 modules) | none of its own ([sources](../eidoverse/sets/unknown_force/SOURCES.md)) |
 | SAME SEED: a sealed room, a kitchen at noon, a lab full of light and a room at 2 a.m., made in Blender ([below](#the-same-seed-rooms)) | [`eidoverse/sets/same_seed.js`](../eidoverse/sets/same_seed.js) + [`same_seed/*.js`](../eidoverse/sets/same_seed/) | [`sets/same_seed/`](../eidoverse/assets/sets/same_seed/README.md) + `models/same_seed_*.glb` |
 | The desert round the town out to 32.8 km, the Blender edition's land ([below](#the-desert)) | [`eidoverse/sets/desert/`](../eidoverse/sets/desert/index.js) | [`models/desert/`](../eidoverse/assets/models/desert/README.md) |
+| WAKE ANOTHER ONE: an automated factory hall, a line of cartons under an overhead crane, its machines on keyed controls, made in Blender ([below](#the-wake-another-one-hall)) | [`eidoverse/sets/wake_another_one/hall.js`](../eidoverse/sets/wake_another_one/hall.js) + [`hall/*.js`](../eidoverse/sets/wake_another_one/hall/) | none of its own: CC0 scans and models fetched by ID, SeedThree trees |
 
 Every asset folder has a README, and a SOURCES file recording licences and
 provenance. A sibling `<name>_src/` folder holds the Blender scripts that
@@ -850,6 +851,138 @@ EEVEE shadows everything. The shrubs past a kilometre read fainter: EEVEE's
 sixteen samples a pixel give a shrub a pixel wide its whole darkness, one
 sample and FXAA give it less. The town in it is the town's own three.js look,
 a little greyer and cooler than the Blender town.
+
+## The WAKE ANOTHER ONE hall
+
+`eidoverse/sets/wake_another_one/hall.js` is the set of the WAKE ANOTHER ONE
+music video, made in the Blender edition (`eidoblend.sets.wake_another_one.hall`):
+an automated factory hall 79 × 248 m and 13 m high. A hero line runs down a
+canyon of racks toward the dock door: a flush roller track with ten two-part
+cartons on it (units 0–9, each a tray with its hood on), a stack for the
+hoods, a lectern with a printer and the crane's pendant, and an overhead
+crane whose ring and four pads lift the hoods off one unit after another and
+stack them. Behind the racks stand more lines, each with its own crane. A
+main track carries a stream of closed cartons out through the dock door, a
+counter shows a number on four drums in a sheet-steel cabinet, and beyond the
+door a yard holds parked trailers, a fence and trees under a low afternoon
+sun whose warm patch ends on the last unit's tray.
+
+It is the Blender edition's hall part for part. The layout is the same file
+(`hall/layout.json`), the carton and the meshes are built by the same steps,
+and every one of the Blender edition's drivers is one function keyed by the
+same controls, so the same controls put every part in the same place.
+
+```js
+const HALL = await import(new URL('sets/wake_another_one/hall.js', EIDOVERSE_DIR).href);
+const hall = await HALL.build(THREE, { small: true });   // the test's hall (two rows of two lanes, cut at y -45)
+scene.add(hall.group);
+hall.camera('cam_aisle_out', camera);                      // the Blender edition's lenses (hall.cams)
+await hall.applyTo(scene, renderer, camera);              // sky, dock sun, AgX, the air
+const key = HALL.animate({ run: [[1, 0], [241, 3]], meter: [[1, 3861], [97, 0]] }, { fps: FPS });
+// per frame:
+hall.update(t, key(t));                                    // or hall.update(t, { run: 3.4, swap: 1 })
+```
+
+- **The controls** have the Blender edition's names: `run`, `along_offset`
+  and `hoist_offset` (the hero crane), `travel` and `swap` (the main track),
+  `crowd_run` (the other lines' cranes), `press` (the pendant's button),
+  `meter` (the counter), `feed` (the printer's sheet) and `haze` (the air).
+  `HALL.CONTROLS` lists them. `HALL.animate(keys, { fps })` keys them on
+  frames, frame 1 being t 0, as the Blender edition's `animate` does.
+  `hall.mark(name)` gives a node's world matrix: a unit's tray frame
+  `line_NN_unit_K`, a body's mark in it `line_00_mark_K`, or `sheet_path`.
+- **Options.** `small`, `look: false` (the layout in flat colours, under a
+  second), `sky`, `trees`, `shadows`, `capture` (the reflections), and the
+  look's numbers as in the Blender look (`strip`, `sun`, `sky_fill`, `haze`,
+  `exposure`, ...) with this edition's `fill`, `reflect` and `dielectric`
+  (below).
+- **Everything is built in code and instanced.** The geometry is the Blender
+  edition's mesh builder and detail pass in JS (`hall/kit.js`: bevels, the
+  inset loop, the wear band, cavity by three-mesh-bvh ray casts over
+  Blender's 14 directions, UVs in metres). `hall/graph.js` is the small
+  object model its drivers run on: parents, collections, collection
+  instances, point instancers and copied transforms, each pick-up of a hood
+  a parent switch. Each mesh is one `InstancedMesh`; the driven placings are
+  recomputed each frame. The counter's digits are Rajdhani Bold from
+  `assets/fonts/`.
+- **The look** (`hall/look.js`, `hall/mats.js`) is the Blender look's
+  materials in TSL over the same ambientCG scans, fetched by ID on first use:
+  Concrete034 at 4k and 2k, Metal049A, Metal027, Metal009, Plastic010,
+  Rubber004, Paper001 and Asphalt012 at 2k. Its noises, Map Range and Mix
+  compute as Blender's nodes do, on the wear and cavity worked out at build
+  time. The fittings are Poly Haven's `power_box_01`, `fire_alarm`,
+  `security_camera_01` and `modular_chainlink_fence`, fitted where the Blender
+  look fits them. The trees are SeedThree's (read only): the five species and
+  seeds the Blender edition grows, at full detail, placed where it places
+  them, casting the sun's shadow.
+- **The light** (`hall/world.js`): the strip rows are RectAreaLights with no
+  shadows, at the Blender look's 36 W a metre; the dock sun (13 W/m², 17.8°
+  up, 10° off the door's axis) keeps its shadow; the sky family's Earth sky
+  stands its sun on the dock sun and the hall turns to meet it; AgX is drawn
+  as Blender draws it. Three.js has no volume probes, so the light the
+  Blender look bakes is stood in for:
+  - **One reflection capture** of the hall from the Blender look's
+    `refl_line` place, the sun, the air and the outdoors left out as the
+    Blender bake leaves them out. It is taken once, at the first `update()`
+    inside the frame loop (drawn during setup a scene comes out black on this
+    stack). Paint and plastic take 0.35 of its reflection (`dielectric`),
+    metal all of it. Its diffuse light is the fill everywhere indoors
+    (`fill`, 0.1).
+  - **The hero aisle's probe** (the Blender look's `hall_probe_aisle`) is a
+    low-order light over its box: E = 1.0 + 0.45 n.z of the lamps' colour,
+    set against the Blender stills. Over that box the hero rows' lamps give
+    highlights only, as the Blender look sets them.
+  - **Outdoors** the materials take the sky's own environment at
+    `sky_fill` (0.06) and an even 1.1 W/m² in the sun's colour for what
+    EEVEE traces on screen there from the sunlit ground and trailers.
+  - The haze is a fog of the Blender look's density (0.0012 a metre).
+    There is no depth of field and no motion blur.
+
+`eidoverse/examples/wake_another_one_hall/` renders it: `small.json` and
+`full.json` (two lenses each, the stills below), and `cycle.json` (the crane
+lifting unit 0's hood and stacking it, the tray swapped out, the stream
+rolling, the counter turning, the button pressed and a sheet fed, eight
+seconds from `cam_aisle_out`). `deno test -A --no-lock
+eidoverse/sets/wake_another_one/hall/hall_test.mjs` checks the layout, the
+machines and the detail pass against the Blender edition's test's numbers:
+run 0 → 1 sets unit 0's hood in stack slot 0; run 1.3 has the bridge over
+unit 1 with the ring down; along_offset moves the bridge 0.5000 m; swap rolls
+the tray to x −3.000; travel 1 m moves a stream carton 1.0000 m; the counter
+shows 1234; press moves the button 6.00 mm; feed carries the sheet 157.9 mm.
+
+Measured at 960 × 540 on an RTX 5090 Laptop GPU:
+
+| Hall | Build | Placings | Triangles drawn | The capture, once | Then a frame |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| small | 17–20 s (detail and cavity 9 s) | 4,579 of 64 meshes | 9.99 M | 6–95 s | 0.1 s |
+| whole | 27–33 s (detail and cavity 16 s) | 36,110 of 64 meshes | 81.33 M | 12–252 s | 0.4–0.5 s |
+
+The capture's long times are its pipelines compiling the first time; the
+192 frames of `cycle.json` took 9 s after the first. Beside the Blender
+edition's stills (the small hall from `cam_aisle_out` and `cam_station`, the
+whole hall from `cam_dock` and `cam_everywhere`) every lens has the same
+hall, machines, cartons, sun patch, yard and trees. Their mean luma, three.js
+against Blender: 0.475 and 0.481, 0.480 and 0.455, 0.521 and 0.542, 0.426 and
+0.408. What differs:
+
+- The hero line's cartons are about a tenth darker, and the hood stack and
+  the lectern by the station about a fifth lighter: the aisle's probe here is
+  one low-order light for the whole box, where the baked one varies along
+  and up the line.
+- The floor's polished lanes mirror the capture, in which the door is dark,
+  where EEVEE traces the bright door on screen: the lane down the aisle
+  reads darker and a little blue.
+- The walls and roof away from the hero line take one capture's light from
+  the line, where the Blender look bakes a coarse probe over the whole hall:
+  the dock wall about a fifth darker, the roof a little lighter. Area lights
+  here have no spread, where the Blender look narrows its plain rows' beams
+  to 80°.
+- The shade outdoors is even, where EEVEE's traced light varies with what is
+  near; the sunlit apron reads a little lighter.
+- The trees' leaves cut out at 0.15 of their alpha, not SeedThree's 0.4 (at
+  60 to 120 m a mipmapped leaf falls under 0.4 and the crown thins to its
+  twigs), and their translucency is scaled to the dock's sun, on these trees'
+  materials only. Their crowns are a little lighter than Blender's.
 
 ## Costs
 

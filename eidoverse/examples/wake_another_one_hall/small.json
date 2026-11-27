@@ -1,0 +1,9 @@
+{
+    "width": 960, "height": 540, "fps": 1, "duration": 2,
+    "script": "eidoverse/examples/wake_another_one_hall/scene.js",
+    "outputVideo": "work/wake_another_one_hall/small.mp4",
+    "skipPreflightQA": true,
+    "small": true,
+    "cameras": ["cam_aisle_out", "cam_station"],
+    "state": { "run": 3.4, "travel": 0.0, "swap": 1.0, "meter": 3861 }
+}
