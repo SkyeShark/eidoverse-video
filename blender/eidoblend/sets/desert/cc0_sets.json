@@ -1,0 +1,17 @@
+{
+ "about": "The desert's own CC0 PBR sets (AmbientCG and Poly Haven), beside the town's (sets/town/cc0_sets.json), fetched by ID into the shared library on first use (harness.assets.fetch_pbr). tile: the set's real size in metres; relief: its displacement map's full range in metres; mean and contrast measured by blender/tools/measure_cc0_sets.py; what: what the desert uses it for.",
+ "sets": {
+  "dune_ripples": {"id": "Ground100", "res": "2k", "tile": [1.1, 1.1], "relief": 0.03, "mean": [0.18491, 0.13576, 0.06185], "contrast": 0.122, "what": "sand in wind ripples: the dunes' windward sides"},
+  "pale_sand": {"id": "Ground093B", "res": "2k", "tile": [2.0, 2.0], "relief": 0.02, "mean": [0.60822, 0.48842, 0.30051], "contrast": 0.033, "what": "smooth pale sand: slip faces, the sand sheet"},
+  "cliff_rock": {"id": "rock_face_03", "res": "2k", "tile": [3.6, 3.6], "relief": 0.25, "mean": [0.23152, 0.14478, 0.08309], "contrast": 0.289, "what": "a weathered rock face, fractured: the escarpment's cliff band"},
+  "cliff_warm": {"id": "marble_cliff_02", "res": "2k", "tile": [4.0, 4.0], "relief": 0.3, "mean": [0.32676, 0.18081, 0.11604], "contrast": 0.501, "what": "a warm cracked cliff: the cliff band's other beds"},
+  "strata": {"id": "Rock019", "res": "2k", "tile": [3.0, 3.0], "relief": 0.15, "mean": [0.46847, 0.47523, 0.46065], "contrast": 0.203, "what": "pale layered rock: the limestone and marl beds"},
+  "dark_rock": {"id": "Rock031", "res": "2k", "tile": [2.5, 2.5], "relief": 0.1, "mean": [0.03316, 0.03374, 0.03037], "contrast": 0.794, "what": "dark veined rock: the inselbergs and the ranges"},
+  "scree": {"id": "rocks_ground_06", "res": "2k", "tile": [2.5, 2.5], "relief": 0.12, "mean": [0.30086, 0.24306, 0.18519], "contrast": 0.459, "what": "pale broken stone: talus under the cliffs"},
+  "stony": {"id": "rocks_ground_02", "res": "2k", "tile": [2.5, 2.5], "relief": 0.08, "mean": [0.16997, 0.12839, 0.07872], "contrast": 0.728, "what": "stones in dirt: desert pavement, debris slopes"},
+  "dark_gravel": {"id": "Gravel024", "res": "2k", "tile": [1.5, 1.5], "relief": 0.03, "mean": [0.07505, 0.07262, 0.06641], "contrast": 0.458, "what": "dark angular gravel: the ranges' debris"},
+  "gravel_sand": {"id": "gravelly_sand", "res": "2k", "tile": [2.0, 2.0], "relief": 0.02, "mean": [0.28934, 0.1597, 0.07436], "contrast": 0.208, "what": "sand with grit: wadi beds"},
+  "sandy_gravel": {"id": "sandy_gravel_02", "res": "2k", "tile": [2.0, 2.0], "relief": 0.02, "mean": [0.32325, 0.17278, 0.08544], "contrast": 0.161, "what": "sandy gravel: bars, the aprons' fans"},
+  "caprock": {"id": "worn_rock_natural_01", "res": "2k", "tile": [3.0, 3.0], "relief": 0.08, "mean": [0.3956, 0.27505, 0.14415], "contrast": 0.159, "what": "worn pale rock: the plateau's caprock surface"}
+ }
+}
