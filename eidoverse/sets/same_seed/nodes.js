@@ -583,8 +583,8 @@ export function makeGraphs(THREE, ctx) {
                 if (from === 'WORLD') return x;
                 if (from === 'OBJECT') {
                     if (vt === 'POINT') return toBl(modelWorldMatrix.mul(vec4(fromBl(x), 1.0)).xyz);
-                    if (vt === 'NORMAL') return toBl(normalize(transformDirection(fromBl(x), modelWorldMatrix)));
-                    return toBl(transformDirection(fromBl(x), modelWorldMatrix));
+                    if (vt === 'NORMAL') return toBl(normalize(transformDirection(modelWorldMatrix, fromBl(x))));
+                    return toBl(transformDirection(modelWorldMatrix, fromBl(x)));
                 }
                 warn('Vector Transform from CAMERA read as WORLD');
                 return x;
@@ -598,7 +598,7 @@ export function makeGraphs(THREE, ctx) {
             }
             if (to === 'CAMERA') {
                 if (vt === 'POINT') return cameraViewMatrix.mul(vec4(fromBl(w), 1.0)).xyz;
-                return transformDirection(fromBl(w), cameraViewMatrix);
+                return transformDirection(cameraViewMatrix, fromBl(w));
             }
             return w;
         }
@@ -663,14 +663,14 @@ export function makeGraphs(THREE, ctx) {
             const c = (await inC(name, 'Color')).mul(2.0).sub(1.0);
             const Nw = worldNrm();
             if ((P.space || 'TANGENT') !== 'TANGENT') {
-                if (P.space === 'OBJECT') return normalize(mix(Nw, toBl(normalize(transformDirection(fromBl(c), modelWorldMatrix))), max(strength, 0.0)));
+                if (P.space === 'OBJECT') return normalize(mix(Nw, toBl(normalize(transformDirection(modelWorldMatrix, fromBl(c)))), max(strength, 0.0)));
                 return normalize(mix(Nw, c, max(strength, 0.0)));
             }
             let Tw, Bw;
             const tname = '_tangent_' + attrName(P.uv_map || 'uvmap');
             if (opts.attrs && opts.attrs.has(tname)) {
                 const ta = attribute(tname, 'vec4');
-                const tw = normalize(transformDirection(ta.xyz, modelWorldMatrix));
+                const tw = normalize(transformDirection(modelWorldMatrix, ta.xyz));
                 const sgn = select(frontFacing, float(1.0), float(-1.0));
                 Tw = toBl(tw).mul(sgn);
                 Bw = cross(Nw, Tw).mul(ta.w);
@@ -824,7 +824,9 @@ export function makeGraphs(THREE, ctx) {
         m.colorNode = vec4(cl.color, 1.0);
         m.metalnessNode = clamp(cl.metal, 0.0, 1.0);
         m.roughnessNode = clamp(cl.rough, 0.0, 1.0);
-        if (cl.normal) m.normalNode = transformDirection(fromBl(cl.normal), cameraViewMatrix).normalize();
+        // (normalNode is view space; world to view is the matrix first: TSL's transformDirection(v, M) is v times M, the
+        // transpose, which is the way three's own normalWorld goes view to world)
+        if (cl.normal) m.normalNode = transformDirection(cameraViewMatrix, fromBl(cl.normal)).normalize();
         if (k.emission > 0) m.emissiveNode = cl.emission;
         if (physical) {
             if (k.coat > 0) { m.clearcoatNode = clamp(cl.coat, 0.0, 1.0); m.clearcoatRoughnessNode = clamp(cl.coatRough, 0.0, 1.0); }
