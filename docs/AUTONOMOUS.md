@@ -86,6 +86,37 @@ D = desert.build('work/<id>/desert')           # the collection 'desert', at the
 - Say in `plan.md` how long the town's and the desert's builds took, and look at a still of the
   road ends: the asphalt must run out under the sand and the track, with no hard edge.
 
+## The SAME SEED rooms and the houseplants
+
+A room (`sealed_room`, `kitchen`, `lab`, `desk`: a sealed room, a kitchen at noon, a lab full of
+light, a room at 2 a.m.) is made once in your folder, then appended in `setup()` with its world,
+its render settings, its cameras and its marks (`tools-guides/props-and-sets.md`, "The SAME SEED
+rooms"). Each is a GPU job of two to three minutes; the kitchen bakes in Blender's Cycles, about 13
+minutes (`--size 1024 --quick` for a draft). Their CC0 sets and models are fetched into the shared
+library on first use:
+
+```bash
+python3 blender/eidoblend/sets/same_seed/make.py desk --out work/<id>/desk
+```
+
+```python
+import os
+from eidoblend import sets
+room = sets.build('same_seed.desk', ctx, blend=os.path.join(ctx.scene_dir, 'desk', 'desk.blend'), render=True)
+room.mark('stand')                             # where a body stands, facing -y; room.marks: where things go
+cam = room.make_camera('window')               # its own cameras (room.cams), under its root
+```
+
+The houseplants build inside `setup()` in a second or two:
+`props.build('houseplants', species='monstera', location=(x, y, 0.0))` (also `rubber_plant`,
+`corn_plant`, `basil`, `watering_can`).
+
+- Keep a room's own render settings (`render=True`): with Fast GI as GI at 16 samples the lab's and
+  the desk room's walls grain.
+- If make.py stops before the bake with exit code 3, your image was built before `warp-lang` was
+  added: say so in `plan.md` and use another place (the kitchen bakes without it).
+- Look at a still from the room's wide camera before you stage anything in it.
+
 ## How you render
 
 Inside the image these run right where you are (no `--local` needed):
