@@ -109,12 +109,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && fc-cache -f && rm -rf /var/lib/apt/lists/*
 
 # Python toolchain (system Python, for the repo-root tools): TTS, audio (demucs/librosa/pyworld), image, data viz,
-# geometry, MIDI, vector graphics, figlet banners.
+# geometry, MIDI, vector graphics, figlet banners, and NVIDIA Warp for blender/tools/gpu_bake.py (the hard-surface
+# props' bakes; it falls back to its CPU device where the container sees no CUDA).
 RUN apt-get update && apt-get install -y --no-install-recommends libcairo2-dev g++ python3-dev && rm -rf /var/lib/apt/lists/*
 RUN pip install --break-system-packages --no-cache-dir \
     edge-tts numpy Pillow staticmap matplotlib skyfield shapely svgwrite \
     cairosvg requests midiutil music21 librosa pyworld demucs stable-ts \
-    pixelsort torchcodec diffq pyfiglet opencv-python-headless
+    pixelsort torchcodec diffq pyfiglet opencv-python-headless warp-lang
 
 # Puppeteer-core + Chrome, required by fetch_model.py for scraping NIH 3D / NASA / Smithsonian model previews.
 RUN mkdir -p /opt/render3d && cd /opt/render3d && \
