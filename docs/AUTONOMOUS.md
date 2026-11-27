@@ -55,6 +55,37 @@ heli.spin(ctx.frame_start, ctx.frame_end, fps=ctx.fps)     # the rotors turning,
   with exit code 3, your image was built before `warp-lang` was added: say so in `plan.md` and
   keep the rifle out of the shot.
 
+## A town and the desert round it
+
+The town builds inside `setup()` (about 15 s at its full 840 x 300 m; its CC0 sets and models are
+fetched into the shared library on first use, so the first build takes longer). It is intact
+unless the brief asks for damage; the shop boards are plain unless the brief gives their words
+(`tools-guides/props-and-sets.md`, "A town and the desert round it"):
+
+```python
+from eidoblend.sets import town
+T = town.build(extent=(840, 300))              # damage=True only when the brief asks for a struck town
+sky = town.light(ctx.scene, camera)            # its sun and the sky family's sky; town.eevee(ctx.scene)
+sky.bake(f, f)                                 # the sky is baked per camera: again after it moves
+```
+
+The desert is made once in your folder (a GPU job of about 6 minutes, and 2.5 GB of terrain cache
+under `eidoverse/assets/cache/terrain`), then built from it in `setup()` with the camera's
+`clip_end` at 33 km or more:
+
+```bash
+python3 blender/eidoblend/sets/desert/make.py --work work/<id>/desert --town 840x300 --to mesh
+```
+
+```python
+from eidoblend.sets import desert
+D = desert.build('work/<id>/desert')           # the collection 'desert', at the town's origin
+```
+
+- The town's yard trees are SeedThree's (the image carries it); its palms are its own.
+- Say in `plan.md` how long the town's and the desert's builds took, and look at a still of the
+  road ends: the asphalt must run out under the sand and the track, with no hard edge.
+
 ## How you render
 
 Inside the image these run right where you are (no `--local` needed):
