@@ -475,7 +475,8 @@ def run_one(t: T, gpu_lock, log=print):
 
 # ----------------------------------------------------------------------------------------- the import smoke ---
 
-SCRIPTS = {'harness/run_scene.py', 'harness/doctor.py'}     # scripts, run by eido_blender.py: never imported
+SCRIPTS = {'harness/run_scene.py', 'harness/doctor.py',     # scripts, run by eido_blender.py: never imported
+           'sets/desert/land.py', 'sets/desert/mesh.py'}    # the desert's plain-Python halves (scipy), run by make.py
 # each family's subpackages and modules reached from its parent as attributes (the packages' lazy exports)
 WIRING = ('characters.controller.Locomotion', 'characters.maneuvers.vault_over', 'characters.emotes.seat_on',
           'characters.robot.VRMRobotBody', 'characters.claudesona.make_wardrobe', 'characters.robotics.make_robot',
