@@ -1,0 +1,8 @@
+{
+    "width": 960, "height": 540, "fps": 1, "duration": 2,
+    "script": "eidoverse/examples/wake_another_one_hall/scene.js",
+    "outputVideo": "work/wake_another_one_hall/full.mp4",
+    "skipPreflightQA": true,
+    "small": false,
+    "cameras": ["cam_dock", "cam_everywhere"]
+}

@@ -4385,6 +4385,44 @@ column.update(frame);                                    // every frame: the fil
   body by body. Keep a float data texture's `eidoverse/data/` name: the
   renderer halves any other `rgba32float` texture.
 
+### The WAKE ANOTHER ONE hall — `eidoverse/sets/wake_another_one/hall.js`
+
+An automated factory hall, 79 × 248 m: a hero line of ten two-part cartons
+on a roller track under an overhead crane that lifts their hoods off and
+stacks them, more lines behind the racks, a main track rolling closed
+cartons out of the dock door, a four-drum counter, and a yard beyond the
+door (trailers, fence, trees) under a low sun. It is the Blender edition's
+hall part for part, its machines on the same controls.
+
+```js
+globalThis._bloomParams = { strength: 0 };               // lit for a render without bloom
+const HALL = await import(new URL('sets/wake_another_one/hall.js', EIDOVERSE_DIR).href);
+const hall = await HALL.build(THREE, { small: true });   // the cut-short test hall; small: false is the whole one
+scene.add(hall.group);
+hall.camera('cam_aisle_out', camera);                     // hall.cams: the Blender edition's lenses
+await hall.applyTo(scene, renderer, camera);             // sky, dock sun, AgX, air
+const key = HALL.animate({ run: [[1, 0], [241, 3]] }, { fps: FPS });
+hall.update(t, key(t));                                   // every frame: the controls, keyed or held
+```
+
+- Controls: `run`, `along_offset`, `hoist_offset` (the hero crane),
+  `travel`, `swap` (the main track), `crowd_run`, `press`, `meter`, `feed`,
+  `haze`. `hall.mark('line_00_mark_3')`: where a body stands in unit 3.
+- Options: `look: false` (flat layout colours), `sky`, `trees`, `shadows`,
+  `capture`, and the look's numbers (`strip`, `sun`, `fill`, ...).
+- Built in code and instanced; the CC0 scans and models are fetched by ID.
+  The reflections are captured once, at the first `update()` in the frame
+  loop.
+- Cost at 960 × 540: build 17–20 s (small) or 27–33 s (whole); the first
+  frame up to 1.5 min (small) or 4 min (whole) while the capture's pipelines
+  compile, then 0.1 s (small) or 0.5 s (whole) a frame.
+- Examples: `eidoverse/examples/wake_another_one_hall/` (`small.json`,
+  `full.json`, `cycle.json`: the crane through a cycle). Test:
+  `deno test -A --no-lock eidoverse/sets/wake_another_one/hall/hall_test.mjs`.
+- Limits: no depth of field or motion blur; the probes' light is
+  approximated (one capture, the aisle's low-order light), so the hero
+  cartons read a little darker than in Blender.
+
 ### The shared library — library code names IDs, never commits them
 
 Third-party CC0 sets (AmbientCG, Poly Haven, TextureCan) are fetched, never
