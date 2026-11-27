@@ -681,6 +681,70 @@ renderer has no screen-space GI, so the bounce is only as fine as the grid's
 cells; the bump's slope is read from screen derivatives, a little softer on the
 finest grain than Blender's.
 
+## The town
+
+`eidoverse/sets/town/` is a concrete-frame town on a street grid: blocks of
+houses of one to five floors with shops, balconies, water tanks and dishes,
+a main road with a median and lamp posts, side streets of packed earth, a
+mosque, parked cars, palms and trees, and an edge that thins out into the
+plain, the asphalt sanding over where the town ends. It is the Blender
+edition's town (`eidoblend.sets.town`) draw for draw: the same seed and
+extent place the same buildings in the same places. Intact by default.
+
+```js
+const TOWN = await import(new URL('sets/town/index.js', EIDOVERSE_DIR).href);
+const town = await TOWN.build(THREE);                       // 840 x 300 m, seed 7: about 8 s
+scene.add(town.group);
+const W = await TOWN.world(THREE, { scene, camera, renderer, root: town.group });
+const [name, pos, target, lens] = town.views()[4];          // the Blender edition's lenses
+TOWN.aim(THREE, camera, town.group, pos, target, lens);
+// per frame:
+W.update(t);
+```
+
+- **Options.** `seed`, `extent` ([x, y] metres of blocks), `edge` (how far
+  the town thins out past them), `ystreets` and `mosque` (the layout),
+  `things: false` (no CC0 models: cars, palms, tanks, dishes, rubbish),
+  `clay: true` (one grey material, for reading the forms), `res` (the CC0
+  sets' resolution).
+- **Damage is an option.** `damage: true` strikes the places the seed picks
+  and builds the town round them: struck houses, rubble, soot. Every placing
+  carries how near a strike it stands (`town.plan.placements[i].tn.dust`).
+- **Signs take your text.** `signs: [text, text, 'a_picture.png']` paints
+  each text on a canvas board (`signFont`, default Anton) or uses your
+  picture; with no `signs` the boards stay blank. No sign text ships.
+- **The look** is TSL over CC0 sets fetched by ID on first use
+  (`sets/town/cc0_sets.json`, through `fetchPBR`): plaster and paint by
+  house, block and brick, concrete, roads with cracks and the sand over
+  their ends, kerbs, packed earth, roofs with their gear. The per-face masks
+  (edges, corners, flats, soot, lanes) are vertex attributes, worked out once
+  per mesh with three-mesh-bvh. About 130 Blender materials draw as 33
+  (their kinds are per-face numbers), because a WebGPU pipeline compiles
+  slowly and every material is one.
+- **`world()`** puts the sun 50° up as the Blender edition has it, makes the
+  sky family's Earth sky (`makeSky`, clear) at the hour that stands its sun
+  there and turns the town about the vertical to meet it (the ocean set's
+  way), tints sun and sky toward a dusty country's, and hangs the dust in the
+  air as fog (the Blender volume's extinction, 0.00042 a metre). Its `fill`
+  (0.35) is the share of the sky's own fill light the town takes, as the
+  Blender edition's `make_sky` ambient.
+- **Everything is instanced.** Every unique mesh is one `InstancedMesh` with
+  every placing of it, each instance with the Blender object's own random
+  number (`objectRandom(name)`, EEVEE's Object Info > Random).
+
+Measured at 960 × 540 on an RTX 5090 Laptop GPU: the build 8.2 s (965
+buildings, 4,086 placings of 68 meshes, 9.5 M triangles drawn from 0.31 M);
+the first frame about 40 s (the pipelines compile), then 6 to 16 s a frame
+(all eleven lenses in 195 s). `eidoverse/examples/town/scene.json` shows the eleven
+lenses one a second; `TOWN_EXTENT=260x160`, `TOWN_DAMAGE=1` and
+`TOWN_CLAY=1` change it. `deno test -A eidoverse/sets/town/town_test.mjs`
+checks the plan against the Blender edition's numbers.
+
+Next to the Blender edition's stills the three.js town has the same
+buildings, streets, cars, trees and shadows in every lens. It is a little
+paler and cooler in the distance: the haze is a fog, not a lit volume, and
+the sky's fill is the sky package's, not Cycles-like bounce light.
+
 ## Costs
 
 Measured on the library modules with an RTX 5090 Laptop GPU at 1920 × 1080,

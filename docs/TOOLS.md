@@ -53,6 +53,8 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/cloud_spatial.js](../eidoverse/cloud_spatial.js) | Dynamic ESM scene API | [sky-weather](../tools-guides/sky-weather.md) |
 | [eidoverse/comfy_bridge.py](../eidoverse/comfy_bridge.py) | Optional TCP bridge service | [audio](../tools-guides/audio.md) |
 | [eidoverse/creature_builder.js](../eidoverse/creature_builder.js) | Injected scene API | [creatures](../tools-guides/creatures.md) |
+| [eidoverse/crowd.js](../eidoverse/crowd.js) | Dynamic ESM scene API: crowds and marching columns of any VRM, one donor's poses baked once into a vertex-animation texture and drawn instanced | [characters](../tools-guides/characters.md) |
+| [eidoverse/crowd_test.mjs](../eidoverse/crowd_test.mjs) | Test: the crowd's clocks and points against the Blender edition's numbers (`deno test -A`) | [characters](../tools-guides/characters.md) |
 | [eidoverse/creature_realist.js](../eidoverse/creature_realist.js) | Injected API with optional external backend | [creatures](../tools-guides/creatures.md) |
 | [eidoverse/creature_specimen.js](../eidoverse/creature_specimen.js) | Injected API with optional external backend | [creatures](../tools-guides/creatures.md) |
 | [eidoverse/dismember.js](../eidoverse/dismember.js) | Injected scene API | [destruction](../tools-guides/destruction.md) |
@@ -94,6 +96,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/effects_tsl/wavy.js](../eidoverse/effects_tsl/wavy.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/basic_vrm.js](../eidoverse/examples/basic_vrm.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/carbine/scene.js](../eidoverse/examples/carbine/scene.js) | Scene example: the carbine in the studio light, three views and a turn | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/examples/crowd/scene.js](../eidoverse/examples/crowd/scene.js) | Scene example: the robot body in a marching column with lanterns, and a canon of waves with a hold | [characters](../tools-guides/characters.md) |
 | [eidoverse/examples/daisy/analyze.py](../eidoverse/examples/daisy/analyze.py) | Example CLI: section-by-section mix measurement | [synthkit](../tools-guides/synthkit.md) |
 | [eidoverse/examples/daisy/captions.py](../eidoverse/examples/daisy/captions.py) | Example CLI: timeline to ASS subtitles, lyric preview | [voicebox](../tools-guides/voicebox.md) |
 | [eidoverse/examples/daisy/song.py](../eidoverse/examples/daisy/song.py) | Worked example: a complete song with voicebox + synthkit | [voicebox](../tools-guides/voicebox.md) |
@@ -110,6 +113,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/robotics/mantis.scene.js](../eidoverse/examples/robotics/mantis.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/manufacturing.scene.js](../eidoverse/examples/robotics/manufacturing.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/motion.scene.js](../eidoverse/examples/robotics/motion.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
+| [eidoverse/examples/town/scene.js](../eidoverse/examples/town/scene.js) | Scene example: the town under its sky through the Blender edition's eleven lenses, one a second | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/examples/unknown_force/scene.js](../eidoverse/examples/unknown_force/scene.js) | Worked example: the UNKNOWN FORCE conductor (sets, outfit, look, captions on one timeline) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/examples/unknown_force/build_timeline.py](../eidoverse/examples/unknown_force/build_timeline.py) | Example CLI: the film's timing spine (beats, sections, lines, gated visemes, documentary clips) | [audio](../tools-guides/audio.md) |
 | [eidoverse/examples/unknown_force/transcribe_raw.py](../eidoverse/examples/unknown_force/transcribe_raw.py) | Example CLI: raw Whisper words of a vocal stem, no prompt | [audio](../tools-guides/audio.md) |
@@ -224,6 +228,10 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/sets/same_seed/light.js](../eidoverse/sets/same_seed/light.js) | SAME SEED submodule: a room's Blender lights as three.js lights (EEVEE's reach, area-light shadows), its bounce grid and reflections | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/same_seed/nodes.js](../eidoverse/sets/same_seed/nodes.js) | SAME SEED submodule: a Blender shader node graph rebuilt as a TSL material (`makeGraphs`) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/same_seed/noise.js](../eidoverse/sets/same_seed/noise.js) | SAME SEED submodule: Blender's Noise, White Noise and Voronoi F1 textures in TSL | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/town/index.js](../eidoverse/sets/town/index.js) | Dynamic ESM set: a concrete-frame town on a street grid (the Blender edition's, draw for draw), instanced, its look in TSL | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/town/layout.js](../eidoverse/sets/town/layout.js) | Town submodule: the plan (blocks, streets, lots, strikes); also house.js, kit.js, street.js, mb.js (the mesh builder), pyrandom.js (Python's random) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/town/look.js](../eidoverse/sets/town/look.js) | Town submodule: the TSL look over the CC0 sets in cc0_sets.json; also masks.js (per-face masks), things.js (CC0 models), world.js (sun, sky, air), views.js (the lenses) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/town/town_test.mjs](../eidoverse/sets/town/town_test.mjs) | Test: the plan and Python's random against the Blender edition's numbers (`deno test -A`) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/unknown_force/bin.js](../eidoverse/sets/unknown_force/bin.js) | Dynamic ESM film set (UNKNOWN FORCE) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/unknown_force/bin_pages.js](../eidoverse/sets/unknown_force/bin_pages.js) | Bin submodule: the page atlas | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/unknown_force/city.js](../eidoverse/sets/unknown_force/city.js) | Dynamic ESM film set (UNKNOWN FORCE); builds the hole too | [props-and-sets](../tools-guides/props-and-sets.md) |

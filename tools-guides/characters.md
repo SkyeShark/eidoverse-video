@@ -850,6 +850,75 @@ hand.
 
 — Claude (Opus 5.5), with Skye
 
+## Crowds and columns — `eidoverse/crowd.js`
+
+A crowd or a marching column of any VRM: one body of it, the donor, is posed
+once per pose and baked into a vertex-animation texture; every body of the
+crowd is that donor drawn instanced, its pose and place worked out in the
+vertex shader from the frame number. It is the Blender edition's crowd tool
+(`eidoblend.characters.crowd`) with the same clocks: a frame shows the same
+pose on every body in both editions.
+
+```js
+const CROWD = await import(new URL('crowd.js', EIDOVERSE_DIR).href);
+const lamp = CROWD.heldProp(THREE, lanternGroup, { bone: 'rightHand', grip: 'fist', hang: true });
+const cyc = await CROWD.strideCycle(THREE, vrm, walkClip, { fps: 24, bpm: 116, posesPerFrame: 2,
+    props: [lamp], curl: { right: 80 }, face: { happy: 1 } });                  // ONE stride, its feet planted
+const pts = CROWD.formation({ files: 3, ranks: 6, interval: 0.85, distance: 1.05, heading: 90,
+    jitter: { lateral: 0.03, along: 0.05, phase: 0.03, seed: 11 } });
+const column = CROWD.crowd(THREE, 'column', pts, CROWD.columnGroup(cyc, { refFrame: 1, show: [10, 4000] }));
+scene.add(column.group);
+const wave = await CROWD.onceFlipbook(THREE, vrm, waveClip, { fps: 24, every: 2 });
+const g = CROWD.grid({ lines: 2, units: 5, linePitch: 2.2, unitPitch: 1.25, origin: [0, 0, -14] });
+const canon = CROWD.crowd(THREE, 'canon', g, CROWD.onceGroup(wave, { hold: [64, 24] }),
+    { starts: CROWD.canonStarts(g, { first: 12, stepLine: 10, stepUnit: 4 }) });
+scene.add(canon.group);
+// per frame, the film's frame number (the first is 1):
+column.update(frame); canon.update(frame);
+```
+
+- **The donor.** Any VRM and any clip. `perPose(vrm, dt)` runs on every
+  baked pose after the clip, so the body's own pass runs there (the robot
+  body's `claude_robot_dof.js` chain, as the example does). `curl` closes a
+  hand round a handle; `face` holds expressions through the bake.
+- **Held props.** `heldProp(THREE, object, { bone, grip, hang })`: any
+  Object3D in either hand. `grip: 'fist'` puts its origin inside a closed
+  hand; `hang: true` keeps it plumb (a lantern, a bag, a bucket), otherwise
+  it turns with the hand (a pole, a tool). Its matrices are baked with the
+  poses.
+- **The stride.** `strideCycle` bakes one stride of a walk that plays in
+  place, as the Blender edition walks it: the root follows the stance feet's
+  contact, and two-bone IK holds each planted foot still on the floor while
+  a swinging one clears it by `clearance` (3 cm). A stride is two beats at
+  `bpm`; `posesPerFrame` 2 or 3 keeps the swing smooth. Its record has the
+  stride's length, the heel strikes, the seam and the IK's miss.
+- **The clocks.** Column: `phase = (frame + frameOffset - refFrame) /
+  strideFrames + dphase`, the pose `round(N x phase) mod N`, carried
+  `S x k / N` along its heading. One-shot: the pose `(frame - start) /
+  every`, clamped. Both take `show`, a `hold` every body keeps from its own
+  frame, and each point's `stops`. `crowd.poseOf(i, frame)` is the same
+  arithmetic on the CPU.
+- **Checks.** `CROWD.feetSlide(THREE, column, frames, point)` measures a
+  body's planted contact through the frames; `CROWD.shownPoses(crowd,
+  frame)` lists what every point shows. `deno test -A
+  eidoverse/crowd_test.mjs` checks the clocks against the Blender edition's
+  numbers.
+
+`eidoverse/examples/crowd/scene.json` puts the robot body (`claude_robot.vrm`)
+in a column of 3 files and 6 ranks at 116 bpm with a lantern in each right
+fist, and two lines of five waving in canon with a hold, one body stopped
+alone. `CROWD_VIEW=close|canon|canon_close` change the lens. Measured on an
+RTX 5090 Laptop GPU: the stride bakes in 1.5 s (50 poses of 109,348
+vertices), and the 96-frame film renders at about 50 fps. Beside the Blender
+edition's stills it has the same poses on the same frames (the canon's
+numbers are equal), the feet's worst slip 0.8 mm a frame (Blender's 0.4 mm;
+its test allows 1 mm) and the stride 1.505 m (Blender's 1.499 m).
+
+Limits: the poses are rigid, so a crowd walks on level ground in straight
+lines; transparent layers are not sorted body by body. A float data texture
+must keep its `eidoverse/data/` name: the renderer halves any other
+`rgba32float` texture as if it were a render target.
+
 ## Turntable sheets
 
 `vrm_turntable.py` (repository root) renders a VRM through the engine in a
