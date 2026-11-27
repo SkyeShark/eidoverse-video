@@ -4225,8 +4225,8 @@ the canonical path (same family as `makeScreen` for drawn content).
   VRMA animation clips, hard-surface props baked to GLB, trim sheets rendered from models.
 - [docs/props-and-sets.md](docs/props-and-sets.md) — eight historical voice machines (1939–2001), an 1896
   tandem with rider IK, the DAISY film's corner, funeral and ocean sets, and the SAME SEED film's carbine,
-  helicopter, houseplants and four rooms made in Blender (below). A town on a street grid and
-  crowds of any VRM: "A town" and "Crowds and columns" below.
+  helicopter, houseplants and four rooms made in Blender (below). A town on a street grid, the
+  desert round it and crowds of any VRM: "A town", "The desert" and "Crowds and columns" below.
 - [docs/voicebox.md](docs/voicebox.md) — singing and speaking voices made from scratch, historical
   machine-voice eras, choirs, phoneme-exact visemes.
 - [docs/synthkit.md](docs/synthkit.md) — hand-built instruments and drums, sequencing, designed FX,
@@ -4314,6 +4314,44 @@ W.update(t);                                             // every frame
 - Example: `python eido.py render eidoverse/examples/town/scene.json`
   (eleven lenses, one a second; `TOWN_EXTENT=260x160`, `TOWN_DAMAGE=1`,
   `TOWN_CLAY=1`). Test: `deno test -A eidoverse/sets/town/town_test.mjs`.
+
+### The desert — `eidoverse/sets/desert/`
+
+The desert round the town, out to 32.8 km: a basin floor rising out of the
+town's plane, a wadi, star dunes, an escarpment, inselbergs and ranges,
+tracks going on from the town's, low scrub. The land is the Blender
+edition's own (its chain's output, exported to
+`eidoverse/assets/models/desert/`, 20 MB); the look is TSL that goes on from
+the town's ground.
+
+```js
+const DESERT = await import(new URL('sets/desert/index.js', EIDOVERSE_DIR).href);
+const desert = await DESERT.build(THREE, { renderer });  // about 5 s
+scene.add(desert.group);                                 // the town's metres: with the town's group, unscaled
+const W = await DESERT.world(THREE, { scene, camera, renderer, roots: [desert.group, town.group] });
+const [name, pos, target, lens] = desert.views()[1];     // the Blender edition's lenses on it
+DESERT.aim(THREE, camera, desert.group, pos, target, lens);
+W.update(t);                                             // every frame
+```
+
+- Give the camera a far plane of 33 km or more (the example: 1 m to 40 km).
+  No town in the scene: `build(..., { plane: true })` lays the town's plane
+  where the town would stand. Options: `scrub: false`, `shadows: false`, `res`.
+- `world()` is the town's (sun, sky, tints, exposure) with its dust in a box
+  round the town out to 3.5 km along each ray, brighter toward the sun and
+  over the sky too, so the far ranges show through it.
+- The sixteen CC0 sets are fetched by ID and read from one texture array
+  (WebGPU binds 16 textures to a shader stage).
+- Turn the post chain's AO off for long views over it
+  (`globalThis._aoParams = { enabled: false }`, as the example does): its
+  samples speckle a floor seen kilometres off.
+- Cost at 960 × 540 with the town: first frame 39 s with the pipelines cached
+  (about 2 minutes cold), then about a quarter of a second a frame.
+- Example: `python eido.py render eidoverse/examples/desert/town.json` (the
+  town in the desert, the Blender edition's sixteen lenses, one a second);
+  `scene.json` the desert alone. Test:
+  `deno test -A eidoverse/sets/desert/desert_test.mjs`. Another desert from
+  the Blender edition: `eidoverse/assets/models/desert_src/`.
 
 ### Crowds and columns — `eidoverse/crowd.js`
 

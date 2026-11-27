@@ -1,0 +1,7 @@
+{
+    "width": 960, "height": 540, "fps": 1, "duration": 16,
+    "script": "eidoverse/examples/desert/scene.js",
+    "outputVideo": "work/desert_example/desert_town.mp4",
+    "skipPreflightQA": true,
+    "town": true
+}
