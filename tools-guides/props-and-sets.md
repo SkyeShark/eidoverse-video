@@ -593,12 +593,16 @@ room.camera('wide', camera);                          // position, aim and field
 const m = room.marks.stand;                           // { position (group-local Vector3), yaw, about }
 ```
 
-- **`build(name, { THREE, shadows })`** returns `{ name, group, parts, lights,
-  cams, marks, camera, applyTo, dispose, lighting, isCameraRay, json, bounds }`.
-  It takes 6–12 s; the first build of a room also fetches its CC0 sets, Poly
-  Haven models and HDRI into the
+- **`build(name, { THREE, shadows, reach })`** returns `{ name, group, parts,
+  lights, cams, marks, camera, applyTo, dispose, lighting, isCameraRay, json,
+  bounds }`. It takes 6–12 s; the first build of a room also fetches its CC0
+  sets, Poly Haven models and HDRI into the
   [shared library](assets.md#the-shared-library--library-code-names-ids-never-commits-them)
-  (about 650 MB for all four rooms).
+  (about 650 MB for all four rooms). The first frame compiles the room's
+  materials: the first still of the kitchen through `eido.py render` (106
+  materials, each reading three soft area shadows) took 50 s on an RTX 5090
+  Laptop GPU, and 22 s once the driver had cached its shaders; the sealed
+  room's took 15 s, then 8 s.
 - **`marks`** are where a body stands and where things are set down: a
   group-local `position`, a `yaw` in radians about +Y where it has one (0 faces
   +Z, toward the wide cameras), a `size` for a surface and an `about`.
@@ -617,13 +621,24 @@ const m = room.marks.stand;                           // { position (group-local
   half saturation, greys kept grey.
 - **Light.** Each Blender light becomes a three.js light: a sun a
   `DirectionalLight` (W/m² as its intensity, a shadow over the room), an area
-  light a `RectAreaLight` (P / (π w h)) with a soft cube shadow from its centre
-  (rooms with more than three shadowed area lights, the lab's panels, keep their
-  light and drop the shadows: each shadow map is a texture every material
-  samples, and WebGPU allows 16), a spot a `SpotLight` and a point a
-  `PointLight` (P / 4π). Every one ends at the reach EEVEE gives it (where its
-  power falls under the light threshold), with three's own window, so the
-  rooms' fill lights reach only as far as they did in Blender. The room's own
+  light a `RectAreaLight` (P / (π w h)), a spot a `SpotLight` and a point a
+  `PointLight` (P / 4π). An area light's shadow is as soft as the light's size
+  makes it: one cube map from its centre holds each direction's distance, and
+  per pixel a search finds what stands between, then the light's rectangle,
+  seen from the pixel through that blocker, is tested direction by direction
+  (percentage-closer soft shadows, each direction against the pixel's own plane
+  so a sloped surface does not shade itself). A blocker near the floor keeps a
+  sharp shadow, one near the light spreads it wide and faint; the penumbra has
+  a fine grain, as EEVEE's does. Rooms with more than three shadowed area
+  lights (the lab's panels) keep their light and drop the shadows: each shadow
+  map is a texture every material samples, and WebGPU allows 16. The sealed
+  room's lights end at the reach EEVEE gives them (where their power falls
+  under the light threshold), with three's own window, because its fill lights
+  stand in for EEVEE's bounce. The other three rooms take their bounce from
+  Cycles (the grid below, which leaves each lamp's own light to the lamp), so
+  their lamps reach as far as their light goes, as in Cycles; `{ reach: true }`
+  ends them where EEVEE does (the lab's ceiling panels then stop at its floor).
+  The room's own
   materials take their environment from `room.lighting`: the diffuse bounce of
   the Blender room's volume probe, as a grid of L1 spherical harmonics in three
   3D textures (Cycles' bounce at each cell, the world's light through the
@@ -671,17 +686,19 @@ values in levels of 255:
 
 | Room | EEVEE | Cycles | Here | Where they differ |
 | --- | ---: | ---: | ---: | --- |
-| `sealed_room` | 0.247 | 0.368 | 0.242 | The room has no volume probe, so here, as in EEVEE, there is no baked bounce (Cycles' closed room is half again brighter). The bench's shadow on the floor is a darker, squarer pool with a soft rim: one cube shadow from the batten's centre, where EEVEE's comes from its whole length. The top of the back wall is darker than EEVEE's, which lights it off the washed ceiling through its screen-traced GI (with the batten alone the two match), and the conduit by the vent throws a dark wedge EEVEE's area shadow washes out. |
-| `kitchen` | 0.485 | 0.457 | 0.433 | EEVEE's volume probe lights the faces under and beside the table (its apron, the chairs) and the cupboard fronts as if nothing stood over them: the apron is 138 in EEVEE, 54 in Cycles and 61 here, the upper fronts 154, 129 and 126. The grid holds Cycles' bounce, so these follow the path-traced still and read darker than the EEVEE one; the front right of the floor is darker than both (52 against 80). `room.lighting.uniforms.bounce = 1.6` brings the fronts to EEVEE's (148) and the floor's left past it (127 against 101). |
-| `lab` | 0.580 | 0.640 | 0.621 | The ceiling, the desk and the back wall follow Cycles, brighter than EEVEE's (the ceiling 176 here, 177 Cycles, 139 EEVEE); the floor is darker than both (138 at the front against 152 and 167) and neutral grey where EEVEE's takes the sky's blue. Along the window heads the rubber gaskets and the beads meet in a serrated line (two faces at one depth, which EEVEE draws cleanly; it shows with the post chain off too, and will shimmer in motion). |
-| `desk` | 0.082 | 0.095 | 0.083 | The wall under the window and the radiator take more of the desk lamp's warm bounce; the window's white frame reads darker and its glass a little hazier with the room's reflection. |
+| `sealed_room` | 0.249 | 0.371 | 0.245 | The room has no volume probe, so here, as in EEVEE, there is no baked bounce (Cycles' closed room is half again brighter). The bench's shadow on the floor is a graded pool, soft from the batten's whole length as EEVEE's is: the floor round the bench is on average 4 levels from EEVEE's (7 in the penumbras either side), 16 under the shelf in both; its umbra is darker beside the legs, where EEVEE's GI reaches in. The stool's shadow has a darker core (32 against 44). The top of the back wall and the left wall by the back corner are darker than EEVEE's, which lights them off the washed ceiling through its screen-traced GI (with the batten alone the two match). |
+| `kitchen` | 0.484 | 0.456 | 0.474 | EEVEE's volume probe lights the faces under and beside the table (its apron, the chairs) and the cupboard fronts as if nothing stood over them: the apron is 86 in EEVEE, 28 in Cycles and 35 here, the upper fronts 158, 123 and 125, the base fronts 156, 105 and 122. The grid holds Cycles' bounce, so these follow the path-traced still and read darker than the EEVEE one. The floor's front right is darker than both (54 against 75 and 74), its front left lighter (92 against 81 in both). `room.lighting.uniforms.bounce = 1.6` brings the fronts near EEVEE's (144) and the floor's left past it (111). |
+| `lab` | 0.581 | 0.641 | 0.646 | The ceiling and the back wall follow Cycles, brighter than EEVEE's (the ceiling 194 here, 185 Cycles, 155 EEVEE). The floor at the front is 154 against EEVEE's 159 and Cycles' 165, and neutral grey where EEVEE's takes the sky's blue: EEVEE's volume probe is baked without the world, and EEVEE lights the room with the world as if nothing stood over it (with the lamps hidden a white clay floor stays at 196 at the front there, and falls to 100 in Cycles). From the wide camera the beads' 20 mm edge along the window heads, lit by the day, is under a quarter of a pixel tall and breaks into dashes (one sample a pixel, where EEVEE averages sixteen); close to, the heads draw clean. |
+| `desk` | 0.080 | 0.093 | 0.084 | The wall under the window and the radiator take more of the desk lamp's warm bounce (18 against 15 in both); the lamp's pool on the rug is darker (27 against 40 and 36); the window's white frame reads darker and its glass a little hazier with the room's reflection. |
 
 Known limits: a Translucent BSDF (the leaves, the paper) is taken as a diffuse
 one, so no light comes through a leaf; the reflections come from one panorama
-with no parallax; an area light's shadow is cast from its centre; three's
-renderer has no screen-space GI, so the bounce is only as fine as the grid's
-cells; the bump's slope is read from screen derivatives, a little softer on the
-finest grain than Blender's.
+with no parallax; an area light's shadow is read from one map at its centre,
+so a blocker the centre cannot see (a shelf under a bench top) casts no shadow
+of its own, and the penumbra's size follows the blocker nearest the light;
+three's renderer has no screen-space GI, so the bounce is only as fine as the
+grid's cells; the bump's slope is read from screen derivatives, a little softer
+on the finest grain than Blender's.
 
 ## The town
 

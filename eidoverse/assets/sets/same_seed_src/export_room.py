@@ -9,7 +9,8 @@ script reads its made .blend and writes, in three's space (metres, +Y up: Blende
 
   rest    <models>/same_seed_<room>_rest.glb: every part that is not a low (walls, floors, trim, the small things),
           keeping each part's transform, its material slots by name and every UV map by name (vertex attributes
-          _UV_<NAME>, Blender's own UVs) with the tangents of each UV a normal map reads (_TANGENT_<NAME>); and
+          _UV_<NAME>, Blender's own UVs) with the tangents of each UV a normal map reads (_TANGENT_<NAME>), the
+          normals Blender shades with, and faces where two parts touch drawn apart (separate_touching); and
           <out>/materials.json: each of those materials' shader node graph (and the world's), which
           eidoverse/sets/same_seed/nodes.js rebuilds in TSL. The pictures they read: CC0 sets by ID (fetched into
           the shared library), the room's drawn prints copied to <out>/prints/.
@@ -298,11 +299,37 @@ def mesh_arrays(o, tangent_uvs=(), texcoord0=None, orco=False, attrs=()):
     me = eo.to_mesh()
     try:
         if tangent_uvs and any(len(p.vertices) > 4 for p in me.polygons):
+            # calc_tangents wants triangles and quads, so the n-gons are cut; each corner keeps the normal it had (a
+            # custom normal, a Weighted Normal's, is stored against its corner's fan of faces, and the cut moves it:
+            # a wall's corner by a door turned 50 degrees, and a long triangle shaded dark across the wall)
+            had = np.empty(len(me.loops) * 3, np.float32)
+            me.corner_normals.foreach_get('vector', had)
+            had = had.reshape(-1, 3)
+            lv0 = np.empty(len(me.loops), np.int32)
+            me.loops.foreach_get('vertex_index', lv0)
+            normal_of = {}
+            for p in me.polygons:
+                for li in p.loop_indices:
+                    normal_of[(p.index, int(lv0[li]))] = had[li]
             bm = bmesh.new()
             bm.from_mesh(me)
+            face_was = bm.faces.layers.int.new('_face_was')
+            bm.faces.index_update()
+            for f in bm.faces:
+                f[face_was] = f.index
             bmesh.ops.triangulate(bm, faces=[f for f in bm.faces if len(f.verts) > 4])
             bm.to_mesh(me)
             bm.free()
+            was = np.empty(len(me.polygons), np.int32)
+            me.attributes['_face_was'].data.foreach_get('value', was)
+            me.attributes.remove(me.attributes['_face_was'])
+            lv0 = np.empty(len(me.loops), np.int32)
+            me.loops.foreach_get('vertex_index', lv0)
+            keep = np.empty((len(me.loops), 3), np.float32)
+            for p in me.polygons:
+                for li in p.loop_indices:
+                    keep[li] = normal_of[(int(was[p.index]), int(lv0[li]))]
+            me.normals_split_custom_set([tuple(n) for n in keep])
         me.calc_loop_triangles()
         nl, nv, nt = len(me.loops), len(me.vertices), len(me.loop_triangles)
         if nt == 0:
@@ -672,6 +699,110 @@ def cycles(samples, denoise=False):
 
 # ------------------------------------------------------------------------------------------------ the rest ---
 
+TOUCH_GAP = 0.00025          # metres each touching face is drawn back into its own part
+
+
+def _overlap(a, b, n, margin=5e-5):
+    """do two triangles in one plane (normal n) share area (more than `margin` metres deep)? (separating axes)"""
+    u = a[1] - a[0]
+    u = u / np.linalg.norm(u)
+    v = np.cross(n, u)
+    pa, pb = np.c_[a @ u, a @ v], np.c_[b @ u, b @ v]
+    for poly in (pa, pb):
+        for i in range(3):
+            e = poly[(i + 1) % 3] - poly[i]
+            ax = np.array([-e[1], e[0]])
+            ax = ax / max(np.linalg.norm(ax), 1e-12)
+            x, y = pa @ ax, pb @ ax
+            if x.max() <= y.min() + margin or y.max() <= x.min() + margin:
+                return False
+    return True
+
+
+def separate_touching(items):
+    """Two parts that touch face to face (a gasket against its bead, a pane against its gasket) lie in one plane over
+    the touch, and three's depth test fights along the edge where one face ends on the other: a serrated line where
+    EEVEE's samples average to a clean one. Each face that touches another part's (in one plane, facing it, sharing
+    area) is drawn back into its own part by TOUCH_GAP, every copy of its corners with it, so the touch becomes a gap of
+    half a millimetre no lens resolves. items: [(object, mesh_arrays)]; their positions are changed in place."""
+    tri_part, tri_idx, nrm, off, key = [], [], [], [], []
+    world = []
+    for pi, (o, arr) in enumerate(items):
+        M = np.array(mesh_matrix(o), np.float64).reshape(4, 4).T
+        P = arr['verts']['P'].astype(np.float64) @ M[:3, :3].T + M[:3, 3]
+        world.append((M, P))
+        T = arr['tri'].astype(np.int64)
+        a, b, c = P[T[:, 0]], P[T[:, 1]], P[T[:, 2]]
+        n = np.cross(b - a, c - a)
+        ar = np.linalg.norm(n, axis=1)
+        keep = ar > 1e-10
+        n = n[keep] / ar[keep, None]
+        big = np.argmax(np.abs(n), axis=1)
+        sgn = np.sign(n[np.arange(len(n)), big])
+        ns = n * sgn[:, None]
+        tri_part.append(np.full(len(n), pi))
+        tri_idx.append(np.nonzero(keep)[0])
+        nrm.append(n)
+        off.append(np.einsum('ij,ij->i', ns, a[keep]))
+        key.append(np.round(ns * 1000.0).astype(np.int64))
+    if not items:
+        return
+    tri_part, tri_idx, nrm, off, key = (np.concatenate(x) for x in (tri_part, tri_idx, nrm, off, key))
+    _, group = np.unique(key, axis=0, return_inverse=True)
+    group = group.ravel()
+    touching = {}                                          # part -> {position key: {normal key: unit normal}}
+    pairs, same = 0, 0
+    order = np.lexsort((off, group))
+    g_sorted, o_sorted = group[order], off[order]
+    starts = np.r_[0, np.nonzero(np.diff(g_sorted))[0] + 1, len(order)]
+    for s0, s1 in zip(starts[:-1], starts[1:]):
+        if s1 - s0 < 2:
+            continue
+        members = order[s0:s1]
+        if len(set(tri_part[members].tolist())) < 2:
+            continue
+        cuts = np.r_[0, np.nonzero(np.diff(o_sorted[s0:s1]) > 5e-5)[0] + 1, s1 - s0]
+        for c0, c1 in zip(cuts[:-1], cuts[1:]):
+            plane = members[c0:c1]
+            if len(plane) < 2 or len(set(tri_part[plane].tolist())) < 2:
+                continue
+            V = np.stack([world[tri_part[t]][1][items[tri_part[t]][1]['tri'][tri_idx[t]].astype(np.int64)] for t in plane])
+            lo, hi = V.min(1) - 5e-5, V.max(1) + 5e-5
+            for i in range(len(plane)):
+                ti = plane[i]
+                js = np.nonzero((tri_part[plane[i + 1:]] != tri_part[ti])
+                                & np.all(lo[i + 1:] < hi[i], axis=1) & np.all(hi[i + 1:] > lo[i], axis=1))[0] + i + 1
+                for j in js:
+                    tj = plane[j]
+                    A, B = V[i], V[j]
+                    if not _overlap(A, B, nrm[ti]):
+                        continue
+                    if np.dot(nrm[ti], nrm[tj]) > 0.0:
+                        same += 1
+                        continue
+                    pairs += 1
+                    for t, X in ((ti, A), (tj, B)):
+                        d = touching.setdefault(int(tri_part[t]), {})
+                        nk = tuple(np.round(nrm[t] * 1000.0).astype(int))
+                        for p in X:
+                            d.setdefault(tuple(np.round(p * 1e5).astype(np.int64)), {})[nk] = nrm[t]
+    for pi, d in touching.items():
+        M, P = world[pi]
+        local = items[pi][1]['verts']['P']
+        inv = np.linalg.inv(M[:3, :3])
+        pk = np.round(P * 1e5).astype(np.int64)
+        index = {}
+        for vi, k in enumerate(map(tuple, pk)):
+            index.setdefault(k, []).append(vi)
+        for k, normals in d.items():
+            step = inv @ (-TOUCH_GAP * np.sum(list(normals.values()), axis=0))
+            for vi in index.get(k, ()):
+                local[vi] = local[vi] + step.astype(np.float32)
+        log('rest', f'{items[pi][0].name}: {len(d)} corners drawn back from the parts it touches')
+    log('rest', f'{pairs} face pairs touching across parts drawn {TOUCH_GAP * 2e3:.1f} mm apart'
+        + (f'; {same} pairs in one plane facing the same way, left as they are' if same else ''))
+
+
 def step_rest():
     g = GLB('eidoverse/assets/sets/same_seed_src/export_room.py')
     mats, matidx = {}, {}
@@ -691,7 +822,7 @@ def step_rest():
             mats[m.name] = material_graph(m)
         return matidx[m.name]
 
-    parts = []
+    parts, todo = [], []
     for o in sorted(OBJS, key=lambda o: o.name):
         if KIND.get(o.name, ('', ''))[0] != 'rest':
             continue
@@ -703,8 +834,10 @@ def step_rest():
         orco = any(n.bl_idname == 'ShaderNodeTexCoord' and any(l.from_socket.name == 'Generated' for l in m.node_tree.links if l.from_node == n)
                    for m in slots if m and m.node_tree for n in m.node_tree.nodes)
         arr = mesh_arrays(o, tangent_uvs=tuvs, orco=orco, attrs=attribute_names(slots))
-        if arr is None:
-            continue
+        if arr is not None:
+            todo.append((o, slots, cc0, arr))
+    separate_touching([(o, arr) for o, _, _, arr in todo])
+    for o, slots, cc0, arr in todo:
         first_uv = o.data.uv_layers[0].name if len(o.data.uv_layers) else None
         prims = glb_prims(g, arr, lambda i: mat_index(slots[i], cc0) if i < len(slots) else None, texcoord0=first_uv)
         has_uv0 = bool(first_uv) and ('UV:' + first_uv) in arr['verts']

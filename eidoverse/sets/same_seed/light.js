@@ -14,30 +14,147 @@ export function makeLight(THREE) {
     const { vec3, texture3D, positionWorld, normalWorld, normalView, positionViewDirection, cameraViewMatrix,
         pmremTexture, roughness, clearcoatRoughness, clearcoatNormalView, pow, clamp, max } = T;
 
-    // an area light's shadow: a cube depth map from the light's centre (three's point-light shadow, so the whole
-    // hemisphere it lights is covered), read through 16 compares over a Vogel disk of `radius` texels, turned per pixel
-    const softPointShadow = T.Fn(({ depthTexture, bd3D, dp, shadow }) => {
-        const radius = T.reference('radius', 'float', shadow).setGroup(T.renderGroup);
-        const mapSize = T.reference('mapSize', 'vec2', shadow).setGroup(T.renderGroup);
-        const ts = radius.div(mapSize.x);
-        const ad = T.abs(bd3D);
-        const tangent = T.normalize(T.cross(bd3D, ad.x.greaterThan(ad.z).select(T.vec3(0, 1, 0), T.vec3(1, 0, 0))));
-        const bitangent = T.cross(bd3D, tangent);
-        const N = 16;                                      // (one fixed disk: each tap is a bilinear compare, so the
-        let sum = T.float(0.0);                            //  penumbra comes out smooth, with no per-pixel grain)
-        for (let i = 0; i < N; i++) {
-            const s = T.vogelDiskSample(i, N, T.float(0.7));
-            sum = sum.add(T.cubeTexture(depthTexture, bd3D.add(tangent.mul(s.x).add(bitangent.mul(s.y)).mul(ts))).compare(dp));
+    // An area light's shadow, soft as the light's size makes it (percentage-closer soft shadows over its rectangle).
+    // One cube map from the light's centre (three's point-light shadow, so the whole hemisphere it lights is covered),
+    // its colour holding each texel's distance from the light. Per pixel: a search over the directions near the
+    // pixel's for what stands between it and the light (the blockers found, the nearest to the light leading), then
+    // the light's rectangle seen from the pixel through a blocker at that distance: a direction (x, y) on the light
+    // (metres, its own axes) crosses it at an angle (x, y) * (1 / blocker - 1 / pixel) from the pixel's, and the
+    // share of those directions with nothing nearer the light than the pixel is the light it gets. A blocker near the
+    // light (the conduit along the ceiling) spreads its shadow wide and faint, one near the pixel (a bench foot) keeps
+    // it sharp. Each direction is tested against the pixel's own plane where the direction meets it, so a sloped
+    // surface does not shade itself.
+    const AREA = { search: 16, taps: 32, nearest: 0.1, widest: 0.45, bias: 0.005, slope: 0.002, margin: 0.01, soft: 0.01 };
+    const GOLDEN = 2.399963229728653;
+    // tap i of n over the unit disk: at radius sqrt((i + .5) / n), even over the area; dense: (i + .5) / n, packed
+    // toward the centre (the search finds a near silhouette first)
+    const disk = (i, n, dense) => {
+        const k = T.float(i).add(0.5).div(T.float(n));
+        const a = T.float(i).mul(GOLDEN);
+        return T.vec2(a.cos(), a.sin()).mul(dense ? k : k.sqrt());
+    };
+    // the distance map read at a direction from the light as three reads the depth cube beside it (WebGPU's faces:
+    // y flipped), without the environment's rotation and flip a colour cube gets
+    let DistanceCube = null;
+    const distanceAt = (map, v, far) => {
+        if (!DistanceCube) {
+            DistanceCube = class extends T.CubeTextureNode {
+                static get type() { return 'SameSeedDistanceCubeNode'; }
+                setupUV(builder, uvNode) { return uvNode; }
+            };
         }
-        return sum.div(N);
-    });
+        return new DistanceCube(map, T.vec3(v.x, v.y.negate(), v.z)).level(0).r.mul(far);
+    };
+    // (a TSL function, so every material that reads the shadow gets its own copy of the loops: three builds a light's
+    // shadow node once and hands it to each material)
+    function areaShadowFilter({ distanceMap, toFragment, shadow, light }) {
+        const far = T.reference('far', 'float', shadow.camera).setGroup(T.renderGroup);
+        const near = T.reference('near', 'float', shadow.camera).setGroup(T.renderGroup);
+        const size = T.reference('mapSize', 'vec2', shadow).setGroup(T.renderGroup);
+        const hw = T.reference('width', 'float', light).setGroup(T.renderGroup).mul(0.5);
+        const hh = T.reference('height', 'float', light).setGroup(T.renderGroup).mul(0.5);
+        const ax = T.uniform(new T.Vector3()).setGroup(T.renderGroup)
+            .onRenderUpdate(() => new T.Vector3().setFromMatrixColumn(light.matrixWorld, 0).normalize());
+        const ay = T.uniform(new T.Vector3()).setGroup(T.renderGroup)
+            .onRenderUpdate(() => new T.Vector3().setFromMatrixColumn(light.matrixWorld, 1).normalize());
+        // (the tap counts as uniforms: a shader compiler cannot unroll the loops, which with a hundred materials each
+        // reading three of these shadows (the kitchen) took a minute to compile)
+        const searchN = T.uniform(AREA.search, 'int').setGroup(T.renderGroup);
+        const tapsN = T.uniform(AREA.taps, 'int').setGroup(T.renderGroup);
+        return T.Fn(() => areaShadowBody({ distanceMap, toFragment, far, near, size, hw, hh, ax, ay, searchN, tapsN }))();
+    }
+    function areaShadowBody({ distanceMap, toFragment, far, near, size, hw, hh, ax, ay, searchN, tapsN }) {
+        const r = T.length(toFragment).toVar();
+        const dir = toFragment.div(r).toVar();
+        const n = T.normalWorldGeometry;                   // (the surface's own, not its bump's)
+        const nP = T.dot(n, toFragment).toVar();
+        // the pixel's own plane along v: where v meets it (clamped to r / 2 .. 2 r), r where v runs off it; less a
+        // margin (the search's is wider: a surface just behind the pixel's is no blocker to size the penumbra by)
+        const reference = (v, margin = 0.0) => {
+            const nv = T.dot(n, v);
+            const t = nv.mul(nP).greaterThan(0.0).select(nP.div(nv).clamp(r.mul(0.5), r.mul(2.0)), r);
+            return t.mul(1.0 - AREA.slope - margin).sub(AREA.bias);
+        };
+        const tap = (s, sx, sy) => dir.add(ax.mul(s.x.mul(sx))).add(ay.mul(s.y.mul(sy))).normalize();
+        const visibility = T.float(1.0).toVar();
+        T.If(r.lessThan(far).and(r.greaterThan(near)), () => {
+            // the search: every direction a blocker nearer than `nearest` metres to the light could shade it from
+            const ks = T.float(1.0 / AREA.nearest).sub(r.reciprocal()).max(0.0);
+            const sx = hw.mul(ks).min(AREA.widest), sy = hh.mul(ks).min(AREA.widest);
+            // (each blocker's spread k = 1 / distance - 1 / r weighed by how near the pixel's own direction it stands,
+            // and the widest found leads: under a bench top its legs' feet take the top's soft penumbra, not their own
+            // sharp one, and the size changes smoothly from pixel to pixel)
+            const k2 = T.float(0.0).toVar(), k3 = T.float(0.0).toVar(), found = T.float(0.0).toVar();
+            const blocker = (v, w) => {
+                const d = distanceAt(distanceMap, v, far);
+                T.If(d.lessThan(reference(v, AREA.margin)), () => {
+                    const k = d.max(0.01).reciprocal().sub(r.reciprocal()).max(1e-4);
+                    k2.addAssign(k.mul(k).mul(w));
+                    k3.addAssign(k.mul(k).mul(k).mul(w));
+                    found.addAssign(w);
+                });
+            };
+            blocker(dir, 1.0);
+            T.Loop(searchN, ({ i }) => {
+                const s = disk(i, searchN, true);
+                blocker(tap(s, sx, sy), T.float(1.0).sub(s.length().mul(0.9)));
+            });
+            T.If(found.greaterThan(0.0), () => {
+                // the light through that blocker: its rectangle as angles at the pixel, at least a texel and a half
+                const k = k3.div(k2);
+                const least = T.float(3.0).div(size.x);
+                const fx = hw.mul(k).clamp(least, AREA.widest), fy = hh.mul(k).clamp(least, AREA.widest);
+                // (the disk turned per pixel, as three's own point shadows turn theirs: a fine grain, as EEVEE's soft
+                // shadows have, where a fixed disk would step the penumbra in bands)
+                const turn = T.interleavedGradientNoise(T.screenCoordinate.xy).mul(6.28318530718).toVar();
+                const c = turn.cos().toVar(), sn = turn.sin().toVar();
+                const lit = T.float(0.0).toVar();
+                T.Loop(tapsN, ({ i }) => {
+                    const d = disk(i, tapsN, false);
+                    const v = tap(T.vec2(d.x.mul(c).sub(d.y.mul(sn)), d.x.mul(sn).add(d.y.mul(c))), fx, fy);
+                    lit.addAssign(distanceAt(distanceMap, v, far).sub(reference(v)).div(AREA.soft).add(0.5).clamp(0.0, 1.0));
+                });
+                visibility.assign(lit.div(T.float(tapsN)));
+            });
+        });
+        return visibility;
+    }
+    let AreaShadowNode = null;   // (made on first use: T is the caller's three)
+    function areaShadowNode(light) {
+        if (!AreaShadowNode) {
+            AreaShadowNode = class extends T.PointShadowNode {
+                static get type() { return 'SameSeedAreaShadowNode'; }
+                setupRenderTarget(shadow, builder) {
+                    const rt = super.setupRenderTarget(shadow, builder);
+                    rt.shadowMap.texture.type = T.HalfFloatType;     // (its colour: the distance, over the far plane)
+                    return rt;
+                }
+                renderShadow(frame) {
+                    // three's shadow-pass material (one per light) writes the distance from the light as its colour
+                    const m = frame.scene.overrideMaterial;
+                    if (!this.distanceOut) {
+                        const L = this.light, at = new T.Vector3();
+                        const o = T.uniform(new T.Vector3()).onRenderUpdate(() => L.getWorldPosition(at));
+                        const far = T.uniform(1.0).onRenderUpdate(() => this.shadow.camera.far);
+                        this.distanceOut = T.vec4(T.vec3(T.positionWorld.distance(o).div(far)), 1.0);
+                    }
+                    if (m && m.outputNode !== this.distanceOut) { m.outputNode = this.distanceOut; m.needsUpdate = true; }
+                    super.renderShadow(frame);
+                }
+                setupShadowFilter(builder, { shadowTexture, shadowCoord, shadow }) {
+                    return areaShadowFilter({ distanceMap: shadowTexture, toFragment: shadowCoord.xyz, shadow, light: this.light });
+                }
+            };
+        }
+        return new AreaShadowNode(light);
+    }
     let rectShadowsPatched = false;
     function patchRectShadows() {
         if (rectShadowsPatched) return;
         rectShadowsPatched = true;
         const base = T.RectAreaLightNode.prototype.setupShadowNode;
         T.RectAreaLightNode.prototype.setupShadowNode = function () {
-            return this.light.shadow && this.light.shadow.isPointLightShadow ? T.pointShadow(this.light) : base.call(this);
+            return this.light.shadow && this.light.shadow.isPointLightShadow ? areaShadowNode(this.light) : base.call(this);
         };
     }
 
@@ -49,9 +166,12 @@ export function makeLight(THREE) {
         ltcReady = true;
     }
 
-    // the room's lights; a shadow-casting light's map covers the room (bounds: { min, max } in metres)
-    async function lights(rows, { shadows = true, bounds = null, shadowSize = 2048, maxAreaShadows = 3 } = {}) {
+    // the room's lights; a shadow-casting light's map covers the room (bounds: { min, max } in metres). reach: each
+    // light ends where EEVEE ends it (its influence); false lets it fall off as far as its light goes, as Cycles does
+    async function lights(rows, { shadows = true, bounds = null, shadowSize = 2048, maxAreaShadows = 3, reach = true } = {}) {
         const out = [];
+        const span = bounds ? new T.Vector3().fromArray(bounds.max).sub(new T.Vector3().fromArray(bounds.min)).length() : 12.0;
+        const influence = (r) => (reach ? r.influence || 0 : 0);
         // each shadow map is one more texture every material samples (WebGPU allows 16 a stage): a room with more
         // shadowed area lights than maxAreaShadows (the lab's eight panels) keeps their light and drops their shadows
         const areaShadows = (rows || []).filter((r) => r.type === 'rectArea' && r.shadow).length <= maxAreaShadows;
@@ -81,36 +201,34 @@ export function makeLight(THREE) {
                 L.position.copy(pos);
                 const m = new T.Matrix4().fromArray(r.matrix);
                 L.quaternion.setFromRotationMatrix(new T.Matrix4().extractRotation(m));
-                if (r.influence) {
+                if (influence(r)) {
                     // EEVEE's reach, as three's point lights end theirs: (1 - (d / r)^4)^2 from the light's centre
                     // (the colour and the centre follow the light: its intensity, colour and place stay live)
                     const light = L, tc = new T.Color(), tp = new T.Vector3();
                     const c = T.uniform(new T.Color()).onRenderUpdate(() => tc.copy(light.color).multiplyScalar(light.intensity));
                     const at = T.uniform(new T.Vector3()).onRenderUpdate(() => light.getWorldPosition(tp));
                     const d = T.positionWorld.sub(at).length();
-                    const w = T.float(1.0).sub(d.div(r.influence).pow(4.0)).clamp(0.0, 1.0);
+                    const w = T.float(1.0).sub(d.div(influence(r)).pow(4.0)).clamp(0.0, 1.0);
                     L.colorNode = c.mul(w.mul(w));
                 }
                 if (shadows && r.shadow && areaShadows) {
-                    // three's rect lights cast no shadow of their own: a cube depth map from the light's centre
-                    // darkens its light where the room hides it, softened about as much as the light's size would
+                    // three's rect lights cast no shadow of their own: a cube map from the light's centre darkens its
+                    // light where the room hides it, as soft as the light's size makes it (areaShadowFilter, above)
                     patchRectShadows();
                     const PointLightShadow = new T.PointLight().shadow.constructor;   // (not exported by name)
                     L.shadow = new PointLightShadow();
                     const size = Math.min(shadowSize, 512);
                     L.shadow.mapSize.set(size, size);
                     L.shadow.camera.near = 0.02;
-                    L.shadow.camera.far = Math.max(4.0, r.influence || 12.0);
+                    L.shadow.camera.far = Math.max(4.0, influence(r) || span);
                     L.shadow.camera.updateProjectionMatrix();
-                    L.shadow.bias = -0.001;
-                    L.shadow.normalBias = 0.02;
-                    const texel = 1.5 * 2 / size;                       // (a cube texel a metre and a half away)
-                    L.shadow.radius = Math.max(1.5, Math.min(24, 0.35 * Math.sqrt(r.width * r.height) / texel));
-                    L.shadow.filterNode = softPointShadow;
+                    L.shadow.normalBias = 0.01;
+                    L.shadow.clearColor = new T.Color(1, 1, 1);       // (an empty texel of the distance map: the far plane)
+                    L.shadow.clearAlpha = 1;
                     L.castShadow = true;
                 }
             } else if (r.type === 'spot') {
-                L = new T.SpotLight(col, r.intensity, r.influence || 0, r.angle, r.penumbra, 2);
+                L = new T.SpotLight(col, r.intensity, influence(r), r.angle, r.penumbra, 2);
                 L.position.copy(pos);
                 L.target.position.copy(pos).add(dir);
                 out.push(L.target);
@@ -118,16 +236,18 @@ export function makeLight(THREE) {
                     L.castShadow = true;
                     L.shadow.mapSize.set(shadowSize, shadowSize);
                     L.shadow.camera.near = 0.05;
+                    L.shadow.camera.far = Math.max(4.0, span);           // (three's own far, 500 m, when it has no reach)
                     L.shadow.bias = -0.0002; L.shadow.normalBias = 0.01;
                     L.shadow.radius = Math.max(1, (r.radius || 0.02) * 60);
                 }
             } else {
-                L = new T.PointLight(col, r.intensity, r.influence || 0, 2);
+                L = new T.PointLight(col, r.intensity, influence(r), 2);
                 L.position.copy(pos);
                 if (shadows && r.shadow) {
                     L.castShadow = true;
                     L.shadow.mapSize.set(1024, 1024);
                     L.shadow.camera.near = 0.05;
+                    L.shadow.camera.far = Math.max(4.0, span);
                 }
             }
             L.name = r.name;
