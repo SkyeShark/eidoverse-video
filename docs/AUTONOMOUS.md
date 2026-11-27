@@ -128,11 +128,11 @@ first use. Its machines are custom properties: key them with `hall.animate` on y
 from eidoblend.sets.wake_another_one import hall
 H = hall.build()                               # trees=False when the image has no SeedThree
 hall.animate({'run': [(1, 0.0), (240, 3.0)], 'meter': [(1, 3861), (96, 0)]})
-H.bake_sky('cam_dock', f0, f1)                 # the sky, again for every camera; never Sky.bake directly
+H.bake_sky('cam_dock', f0, f1)                 # the sky, again for every camera
 ```
 
-- Bake the sky through `H.bake_sky`. Called directly after the volume probe bake, the sky family's
-  sky bakes black.
+- Bake the sky again for every camera you render; `H.bake_sky` sets the camera and the frames. The
+  sky's baker sets its own GPU draw state, so it bakes the same after the volume probe bake.
 - Turn the hall's air off (`'haze': [(f, 0.0)]`) for close shots: it saves 2.5 to 3.5 s a frame.
 
 ## Crowds and marching columns
