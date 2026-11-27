@@ -1,0 +1,11 @@
+{
+    "width": 960,
+    "height": 540,
+    "fps": 24,
+    "duration": 1.0,
+    "script": "eidoverse/examples/same_seed_rooms/scene.js",
+    "outputVideo": "work/same_seed_rooms/lab.mp4",
+    "skipPreflightQA": true,
+    "room": "lab",
+    "camera": "wide"
+}
