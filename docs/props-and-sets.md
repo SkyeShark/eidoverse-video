@@ -1,8 +1,9 @@
-# Props and sets from the DAISY and UNKNOWN FORCE films
+# Props and sets from the DAISY, UNKNOWN FORCE and SAME SEED films
 
 [Main instructions](../AGENTS.md)
 
-This library holds finished props and sets from the DAISY and UNKNOWN FORCE music videos.
+This library holds finished props and sets from the DAISY and UNKNOWN FORCE music videos,
+and props from the SAME SEED film.
 Each piece has a module that builds it, animates it on the film clock, and
 reads its own files. They are usable as they are in a new piece, and as
 worked examples of hard-surface props, baked looks, GPU-driven moving parts
@@ -12,6 +13,9 @@ and whole enclosed sets.
 | --- | --- | --- |
 | Eight historical voice machines, 1939–2001 | [`eidoverse/props/voice_machines/`](../eidoverse/props/voice_machines/index.js) | [`models/voice_machines/`](../eidoverse/assets/models/voice_machines/README.md) |
 | An 1896-pattern tandem bicycle, its rider rig and a teapot stoker | [`eidoverse/props/tandem.js`](../eidoverse/props/tandem.js) | [`models/tandem_1896/`](../eidoverse/assets/models/tandem_1896/README.md) |
+| SAME SEED: an M4A1-pattern carbine on its GPU bakes, one layered material in TSL | [`eidoverse/props/carbine.js`](../eidoverse/props/carbine.js) + [`layered_material.js`](../eidoverse/layered_material.js) | [`models/carbine/`](../eidoverse/assets/models/carbine/README.md) |
+| SAME SEED: a UH-60-pattern helicopter as its 2.7 M-triangle high, its masks on its vertices, its rotors turning | [`eidoverse/props/helicopter.js`](../eidoverse/props/helicopter.js) | [`models/helicopter/`](../eidoverse/assets/models/helicopter/README.md) |
+| SAME SEED: a rubber plant, a Monstera on its coir pole, a corn plant, a pot of basil and a watering can | [`eidoverse/props/houseplants.js`](../eidoverse/props/houseplants.js) | [`models/houseplants/`](../eidoverse/assets/models/houseplants/README.md) |
 | The corner and the march (a room and a night camp) | [`eidoverse/sets/corner.js`](../eidoverse/sets/corner.js) | [`sets/corner/`](../eidoverse/assets/sets/corner/README.md) + `models/corner_*.glb` |
 | The funeral (a bridge in fog and a warehouse vigil) | [`eidoverse/sets/funeral.js`](../eidoverse/sets/funeral.js) + [`funeral/bridge.js`](../eidoverse/sets/funeral/bridge.js) | [`sets/funeral/`](../eidoverse/assets/sets/funeral/README.md) + `models/funeral_*.glb` |
 | The ocean of faces (a headland at night) | [`eidoverse/sets/ocean.js`](../eidoverse/sets/ocean.js) + [`ocean/*.js`](../eidoverse/sets/ocean/) | [`sets/ocean/`](../eidoverse/assets/sets/ocean/README.md) + `models/ocean_*.glb` |
@@ -180,6 +184,200 @@ The bike measures 2.40 × 1.16 × 0.58 m.
 
 **Cleanup.** `bike.dispose()` and `pot.dispose()` free their geometry and
 materials.
+
+## The SAME SEED props
+
+The carbine, the helicopter and the houseplants were made for the SAME SEED
+film in the Blender edition (branch `blender`: `eidoblend.props.carbine`,
+`.helicopter`, `.houseplants`), which builds each from nothing. Here each is a
+GLB that the edition exported, and a module that rebuilds its look in TSL from
+the same numbers. Their `_src/` folders hold the export and packing scripts
+and say how to make them again. The helicopter and the houseplants are packed
+with `EXT_meshopt_compression`; their modules give their own GLTFLoader three's
+`MeshoptDecoder`.
+
+Each was compared with the Blender edition's stills of the same asset, from the
+same cameras under the same light (the Blender judging room's gradient and
+softboxes for the carbine, its sun and flat sky for the helicopter and the
+plants): the forms, colours, wear, markings and leaves match. What differs is
+said in each section and under [Limitations](#limitations).
+
+### The carbine
+
+An M4A1-pattern carbine built as a hard-surface game asset: a 499 k-triangle
+high drawn again as a low of the same 64 parts (21 k triangles), the high
+baked onto the low on the GPU, one layered material on the bakes. Function
+markings only (the rail's numbers, the selector's SAFE / SEMI / AUTO): no
+maker's marks, no serial.
+
+```js
+// In setup()
+const C = await import(new URL('props/carbine.js', EIDOVERSE_DIR).href);
+const rifle = await C.build(THREE, { condition: { wear: 1.0, polish: 1.0, dust: 1.0, grime: 1.0 } });
+scene.add(rifle.group);
+rifle.parts.magazine;                 // the 64 parts by name: upper_receiver, pistol_grip, optic, selector_lever ...
+rifle.materials.layered;              // the TSL material; rifle.materials.lens: the optic's coated glass
+rifle.dispose();
+```
+
+- **Its space.** Metres; +X to the muzzle, +Y up, +Z the carbine's right; the
+  origin on the bore's axis at the receiver's rear face (the butt at
+  x −0.1785, the flash hider's end at 0.582). Every part is at identity, so the
+  group carries it.
+- **Its look.** One [layered material](#the-layered-material-on-baked-maps)
+  with the carbine's tables (`carbine_layered.json`): hard-anodised aluminium
+  (the upper, the lower and the fore-end each a batch's own tone), phosphated
+  steel, black oxide, moulded polymer, the magazine's grey dry film, stainless,
+  rubber; worn at its edges and its extremities, polished and fingerprinted
+  where hands go, dusty in its recesses, carbon at the muzzle and behind the
+  ejection port. `condition` scales the wear, the polish, the dust and the
+  grime together (1 as built, 0.3 nearly new, 1.6 hard used).
+- **Options.** `glb` (bytes instead of the library's file), `photos` and `maps`
+  (already loaded, to share between several carbines).
+- **Files.** The maps are 4096² and lossless (19 MB with the GLB); the six CC0
+  photographs the material reads are fetched on first use.
+- **Example.** [`eidoverse/examples/carbine/`](../eidoverse/examples/carbine/scene.js):
+  the three views of the Blender edition's stills, then a turn round it, in the
+  studio light.
+
+### The helicopter
+
+A UH-60-pattern helicopter built from one measured datum: a lofted skin with
+the aircraft's own sections, hollow, every opening cut through its wall with
+glass, seals and screws; the spine, engines and exhausts; the pylon,
+stabilator and tail rotor; the main rotor's head and four twisted, swept-tip
+blades; the gear hanging as in flight; the cabin's seats, panel and consoles;
+the cabin doors slid open. 290 parts, 2.7 M triangles, rendered as its high.
+Function stencils only: no service title, no serial, no unit's mark.
+
+```js
+// In setup()
+const H = await import(new URL('props/helicopter.js', EIDOVERSE_DIR).href);
+const heli = await H.build(THREE);                 // { rpm, tailRpm } set update's default speeds
+scene.add(heli.group);
+heli.group.position.set(0, 40, 0);                 // fly it by moving the group: its nose is along -X
+// per frame
+heli.update(t);                                    // or update(t, { rpm, tailRpm })
+heli.mainRotor; heli.tailRotor; heli.parts.seat_door_l; heli.materials.paint;
+```
+
+- **Its space.** Metres; +X aft of the mast, +Y up from the cabin floor, +Z to
+  the aircraft's left. The nose is at x −4.5 and the tail rotor's hub at x 9.9;
+  the main wheels hang to y −0.91, so set it down on a floor by lifting it
+  0.91 m. At the open left door a troop seat faces out (`seat_door_l`, its pan
+  0.445 m above the floor).
+- **The rotors.** `update(t)` turns `mainRotor` about its own +Y (the mast,
+  leaning 3° forward under `mast_tilt`) at 258 rpm, counter-clockwise from
+  above, and `tailRotor` about its own −Z (the shaft, canted 20° under
+  `tail_rotor_cant`) at 1190 rpm. It is a pure function of `t`, so seeking
+  works. At 24 fps the main rotor turns 64.5° a frame, and four blades strobe as
+  a filmed rotor does; the studio example idles them at 30 rpm.
+- **Its look.** The masks are on the high's own vertices (`_MASKS`: the nearness
+  of an exposed arris and of an inside corner, the openness near and far), and
+  one layer stack reads them for every role (`heli.materials`: paint,
+  paint_turning, frame_grey, armour, liner_quilt, floor_nonskid, seat_cloth,
+  rubber, tyre, bright_steel, black_console, glass, blade and the lenses): a
+  flat drab chalked by the sun, every frame and stringer a row of rivet heads
+  and every joint a fine seam (drawn at 2.5 mm a pixel and laid through the
+  hull from each side), the stencils reading true on both sides, dust thick on
+  the belly and the lower flanks, soot streaked aft from the exhausts, oil
+  under the gearbox, boots at the sills, quilted blankets inside, tinted glass
+  under a film of dust, black blades with a bright erosion strip. It reads no
+  CC0 sets.
+- **Its weight.** The GLB is 19.8 MB (82 MB unpacked); it loads in about half a
+  second, and a 1920 × 1080 studio frame with it took about 6 ms more than the
+  empty studio. No lower-detail version is shipped:
+  `helicopter_src/export_glb.py --mask-caps` makes one from the same high if a
+  piece needs it.
+- **Examples.** [`studio.js`](../eidoverse/examples/helicopter/studio.js): a
+  walk round it on its wheels in the studio light;
+  [`flight.js`](../eidoverse/examples/helicopter/flight.js): flying low over a
+  plain under the engine's sky.
+
+### The houseplants
+
+Four houseplants and a watering can, each grown as it grows, with their
+materials: a rubber plant (Ficus elastica) in a glazed stoneware pot, a
+Monstera deliciosa on its coir pole in terracotta, a corn plant (Dracaena
+fragrans 'Massangeana') in a fibre-clay planter on expanded-clay pebbles, a
+pot of sweet basil, and a yellow watering can.
+
+```js
+// In setup()
+const HP = await import(new URL('props/houseplants.js', EIDOVERSE_DIR).href);
+const library = await HP.library(THREE);                        // the CC0 sets, loaded once for every plant
+for (const [species, x] of [['rubber_plant', -0.75], ['monstera', 0], ['corn_plant', 0.75]]) {
+    const p = await HP.build(THREE, species, { library });       // { group, parts, materials, dispose }
+    p.group.position.x = x;
+    scene.add(p.group);
+}
+```
+
+- **Species.** `HP.SPECIES`: `rubber_plant` (1.6 m tall, its pot 0.32 m),
+  `monstera` (1.2 m on its pole, its pot 0.3 m), `corn_plant` (1.85 m, its
+  planter 0.4 m), `basil` (0.25 m, a 9 cm pot), `watering_can` (0.41 m long),
+  and `coir_pole` (the Monstera's moss pole and its ties alone). Each stands on
+  y = 0 at its pot's centre and faces +Z, in metres. Nothing moves (no wind).
+- **The leaves.** Thin closed solids that carry their own data
+  (`_LEAFDATA`, `_LEAFQ`), which the leaf material reads: each species' green,
+  the newest leaves paler or bronzed, the veins where the species has them (the
+  Monstera's primaries and faint secondaries, the rubber plant's fine laterals
+  and its bronze rim, the corn plant's lime band and parallel veins), a waxy
+  coat, a paler underside, and light through the blade from behind (Blender's
+  Translucent BSDF, mixed in by each species' share).
+- **The rest.** Potting mix a little damp, unglazed terracotta with the lime
+  the water leaves on its foot, the glazed pot's speckle, the fibre clay, the
+  pebbles, the corn plant's ringed bark, the coir's fibre, green stems (the
+  rubber plant's turning red-bronze toward its top), moulded plastic: seven
+  CC0 sets at their real sizes, fetched on first use.
+- **Example.** [`eidoverse/examples/houseplants/`](../eidoverse/examples/houseplants/scene.js):
+  the five in the studio light.
+
+### The layered material on baked maps
+
+[`eidoverse/layered_material.js`](../eidoverse/layered_material.js) is the TSL
+port of the Blender edition's `eidoblend.materials.layered`: one material that
+reads a baked asset's maps, each layer a whole material blended over the one
+below by one factor, each factor from a cause. The carbine uses it; any asset
+baked by the Blender edition's GPU baker can.
+
+```js
+const LM = await import(new URL('layered_material.js', EIDOVERSE_DIR).href);
+const maps = await LM.loadBake(THREE, new URL('../assets/models/my_prop/', import.meta.url), 'my_prop');
+const photos = await LM.photos(THREE);             // the grain sets, fingerprints, chips and scratches (CC0, fetched)
+const mat = LM.bakedMaterial(THREE, maps, {
+    1: { base: [0.026, 0.031, 0.033], worn: [0.70, 0.71, 0.73], base_rough: 0.46, worn_metal: 1.0, wear: 1.0,
+         polish: 0.6, dust: 0.6, grime: 0.7, grain: 0, mottle: 0.05, rub: 1.3, scratches: 0.6 },
+}, { photos, hands: [[[-15, -40, -160], [75, 40, -45], 6.0]], knocks: [['x', 400, 440]], condition: { wear: 1.2 } });
+```
+
+- **The maps** (`<name>_<map>.png`): `normal` (OpenGL, MikkTSpace: export the
+  GLB with its tangents), `masks_a` (AO, cavity, fine curvature), `masks_b`
+  (exposed-edge nearness, broad curvature, inside-corner nearness), `id` (the
+  substrate ID × 16), and optionally `marks` and `relief`. They are read on the
+  glTF's own UVs; `loadBake` packs them into four textures.
+- **The stack.** SUBSTRATE (the row of its baked ID: base and worn colours,
+  roughness, metalness, how much it wears, polishes, dusts and grimes; the
+  grain of a CC0 photograph box-projected in the asset's millimetres) →
+  MARKINGS → GRIME in the cavities → WEAR in two stages (a rub that thins the
+  coating, a chip down to what lies beneath, broken by a photographed chip
+  pattern, only where knocks go) → HANDLING (polish and fingerprints in the
+  `hands` boxes) → DUST in the cavities and on what faces up → STAINS (`stains`:
+  products of ramps, each with an amount) → cavity and AO into the colour, the
+  normal map and a micrometre bump.
+- **The asset's space.** Every table is in millimetres of the asset's Blender
+  space (+Z up). A glTF exported Y-up holds (x, y, z) as (x, z, −y), and the
+  material reads the local position back that way (`axes: 'blender'` for a
+  geometry already Z-up).
+- **Beyond Blender's material.** The baked AO also shades the environment's
+  light (`envAO`, on by default), standing in for the AO and ray tracing EEVEE
+  adds. `kit(THREE)` is the node layer the stack is written in: Blender's
+  smoothstep and map range, its fBm noise and Voronoi, its BOX projection and
+  Cubic interpolation, pictures laid square through a rectangle, the Bump node.
+  The helicopter's and the houseplants' materials are written in it.
+- **Textures.** WebGPU allows 16 sampled textures a shader stage, and the
+  renderer's own (the environment, a shadow map) count too. The stack samples
+  ten.
 
 ## Sets
 
@@ -401,6 +599,21 @@ The corner's texture memory covers both areas and includes the SeedThree
 trees and the grass. The ocean's includes the sky. The era-1 machines load
 their tiling sets once per built machine, so two Voders cost twice.
 
+The SAME SEED props were measured on the same GPU in the examples' studio
+light (a room environment, a hemisphere and a key; no post chain) at
+1920 × 1080, as a frame's wall time from submit to finished (the median of
+30), where the empty studio takes about 12 ms. Texture memory is corrected the
+same way.
+
+| Piece | Build | Draws | Triangles | Frame time over the empty studio | Textures |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `carbine` | 3.5 s | 64 | 21k | +4 ms | 400 MB |
+| `helicopter` | 0.5 s | 292 | 2.71M | +6 ms | 125 MB |
+| houseplants (each) | 0.3–1.6 s | 1–7 | 7k–193k | under +1 ms | 40–160 MB |
+
+The carbine's build is mostly its 4096² maps unpacked and given their mip
+chains on the CPU; build several with `{ maps, photos }` shared.
+
 ## Verify
 
 Build the piece from its library path in a short probe. Read the log for
@@ -448,7 +661,27 @@ globalThis.renderFrame = async function (t) { globalThis._m.update(t, { power: 1
   the city and the hole build without their maps, the interiors skip them,
   and the corridor, the news and the bin stop with a file-not-found error.
 - **Named for their films.** The sets' beats, captions and marks were written for
-  DAISY and UNKNOWN FORCE. The machines and the tandem are general props.
+  DAISY and UNKNOWN FORCE. The machines, the tandem and the SAME SEED props are
+  general props.
+- **The SAME SEED props beside their Blender stills.** Blender renders many
+  samples a pixel; this renderer shades one.
+  - The carbine's arrises and rail teeth read a little brighter, and its
+    cooling slots lighter, than in EEVEE: three's area lights cast no shadow and
+    it has no ray-traced occlusion.
+  - The leaves' light through the blade comes from direct lights only (none
+    from the environment behind them). The stems' and the watering can's small
+    subsurface weight (0.15 in Blender) is left out.
+  - A bump narrower than a pixel and a half steps from pixel to pixel in one
+    sample, so the leaves' ribs and veins are softened to that width for the
+    bump only (their colour is exact).
+  - The plants are each grown alone. The Blender edition's `build_group` grows
+    several clear of each other, so a group there can differ leaf by leaf.
+- **The helicopter's rotor strobes** at film frame rates (64.5° a frame at
+  24 fps), as a filmed rotor does; there is no rotor blur.
+- **Shadow maps with the sky facade.** In the helicopter's flight example,
+  turning shadow maps on with `sky_worlds.js` made one of the sky's pipelines
+  invalid (two `ShaderModule ... invalid` errors) and the clouds were lost, so
+  that example renders without shadows.
 - **Rebuilds.** The `_src` scripts reproduce the assets only in the working
   layout their READMEs describe, and they need CC0 source sets that are not
   shipped.

@@ -4224,7 +4224,8 @@ the canonical path (same family as `makeScreen` for drawn content).
 - [docs/blender.md](docs/blender.md) — headless Blender (`run_blender.sh`), garments and accessories for VRMs,
   VRMA animation clips, hard-surface props baked to GLB, trim sheets rendered from models.
 - [docs/props-and-sets.md](docs/props-and-sets.md) — eight historical voice machines (1939–2001), an 1896
-  tandem with rider IK, and the DAISY film's corner, funeral and ocean sets.
+  tandem with rider IK, and the DAISY film's corner, funeral and ocean sets; the SAME SEED film's carbine,
+  helicopter and houseplants (below).
 - [docs/voicebox.md](docs/voicebox.md) — singing and speaking voices made from scratch, historical
   machine-voice eras, choirs, phoneme-exact visemes.
 - [docs/synthkit.md](docs/synthkit.md) — hand-built instruments and drums, sequencing, designed FX,
@@ -4235,6 +4236,29 @@ the canonical path (same family as `makeScreen` for drawn content).
   burning from a mesh, with its own compositor.
 - [docs/webxr.md](docs/webxr.md) — a headset (WebXR) page of a piece, when the brief asks for one:
   the `eidoverse/xr/` kit, stills from the container, and the serving steps left to the operator.
+
+### The SAME SEED props — a carbine, a helicopter, houseplants
+
+Three props the Blender edition makes from nothing, as GLBs with their looks rebuilt in TSL
+([docs/props-and-sets.md](docs/props-and-sets.md), "The SAME SEED props"):
+
+```js
+const C = await import(new URL('props/carbine.js', EIDOVERSE_DIR).href);
+const rifle = await C.build(THREE, { condition: { wear: 1 } });    // metres: +X to the muzzle, +Y up
+const H = await import(new URL('props/helicopter.js', EIDOVERSE_DIR).href);
+const heli = await H.build(THREE);                                   // nose along -X; per frame heli.update(t) turns the rotors
+const HP = await import(new URL('props/houseplants.js', EIDOVERSE_DIR).href);
+const plant = await HP.build(THREE, 'monstera');                     // rubber_plant, corn_plant, basil, watering_can, coir_pole
+```
+
+- The carbine's material is `eidoverse/layered_material.js`, the layered material on a GPU-baked asset's maps;
+  any such asset can use it. Its six CC0 photographs and the plants' seven CC0 sets are fetched on first use;
+  the helicopter reads none.
+- The helicopter (2.7 M triangles, 19.8 MB) and the plants are `EXT_meshopt_compression` GLBs, decoded by their
+  modules. Lift the helicopter 0.91 m to stand it on its wheels.
+- Examples, each in the props' studio light (`eidoverse/examples/studio_light.js`): `eidoverse/examples/carbine/`,
+  `helicopter/studio.json`, `houseplants/`; and `helicopter/flight.json`, low over a plain under the engine's sky.
+  That one keeps shadow maps off: with the sky facade they make one of its pipelines invalid on this stack.
 
 ### The shared library — library code names IDs, never commits them
 

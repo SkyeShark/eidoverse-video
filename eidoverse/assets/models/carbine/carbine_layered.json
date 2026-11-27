@@ -1,0 +1,565 @@
+{
+ "about": "the carbine's layered material (eidoblend.props.carbine.look on materials.layered.baked_material)",
+ "axes": "millimetres in the carbine's Blender space: +X to the muzzle, +Y its left, +Z up; glTF (x, y, z) is (x, -z, y)",
+ "ids": {
+  "1": "upper_anodised",
+  "2": "lower_anodised",
+  "3": "rail_anodised",
+  "4": "anodised",
+  "5": "phosphate",
+  "6": "muzzle",
+  "7": "oxide",
+  "8": "stock_polymer",
+  "9": "grip_polymer",
+  "10": "magazine",
+  "11": "stainless",
+  "12": "glass",
+  "13": "rubber"
+ },
+ "substrates": {
+  "1": {
+   "base": [
+    0.026,
+    0.031,
+    0.033
+   ],
+   "worn": [
+    0.7,
+    0.71,
+    0.73
+   ],
+   "base_rough": 0.46,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.3,
+   "wear": 1.0,
+   "polish": 0.6,
+   "dust": 0.6,
+   "grime": 0.7,
+   "grain": 0,
+   "mottle": 0.05,
+   "rub": 1.3,
+   "scratches": 0.6
+  },
+  "2": {
+   "base": [
+    0.024,
+    0.028,
+    0.03
+   ],
+   "worn": [
+    0.7,
+    0.71,
+    0.73
+   ],
+   "base_rough": 0.48,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.3,
+   "wear": 1.0,
+   "polish": 0.6,
+   "dust": 0.6,
+   "grime": 0.7,
+   "grain": 0,
+   "mottle": 0.05,
+   "rub": 1.3,
+   "scratches": 0.6
+  },
+  "3": {
+   "base": [
+    0.024,
+    0.028,
+    0.03
+   ],
+   "worn": [
+    0.7,
+    0.71,
+    0.73
+   ],
+   "base_rough": 0.47,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.3,
+   "wear": 1.2,
+   "polish": 0.9,
+   "dust": 0.6,
+   "grime": 0.7,
+   "grain": 0,
+   "mottle": 0.05,
+   "rub": 1.3,
+   "scratches": 0.6
+  },
+  "4": {
+   "base": [
+    0.025,
+    0.028,
+    0.03
+   ],
+   "worn": [
+    0.7,
+    0.71,
+    0.73
+   ],
+   "base_rough": 0.46,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.3,
+   "wear": 0.9,
+   "polish": 0.5,
+   "dust": 0.6,
+   "grime": 0.7,
+   "grain": 0,
+   "mottle": 0.05,
+   "rub": 1.2,
+   "scratches": 0.5
+  },
+  "5": {
+   "base": [
+    0.048,
+    0.046,
+    0.041
+   ],
+   "worn": [
+    0.5,
+    0.5,
+    0.52
+   ],
+   "base_rough": 0.66,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.36,
+   "wear": 0.9,
+   "polish": 0.5,
+   "dust": 0.6,
+   "grime": 0.8,
+   "grain": 1,
+   "mottle": 0.09,
+   "rub": 0.8,
+   "scratches": 0.2
+  },
+  "6": {
+   "base": [
+    0.048,
+    0.046,
+    0.041
+   ],
+   "worn": [
+    0.5,
+    0.5,
+    0.52
+   ],
+   "base_rough": 0.68,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.36,
+   "wear": 0.4,
+   "polish": 0.3,
+   "dust": 0.6,
+   "grime": 0.9,
+   "grain": 1,
+   "mottle": 0.09,
+   "rub": 0.8,
+   "scratches": 0.2
+  },
+  "7": {
+   "base": [
+    0.021,
+    0.021,
+    0.023
+   ],
+   "worn": [
+    0.5,
+    0.5,
+    0.52
+   ],
+   "base_rough": 0.42,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.34,
+   "wear": 0.7,
+   "polish": 0.3,
+   "dust": 0.5,
+   "grime": 0.6,
+   "grain": 1,
+   "mottle": 0.03,
+   "rub": 1.0,
+   "scratches": 0.2
+  },
+  "8": {
+   "base": [
+    0.0145,
+    0.0145,
+    0.0155
+   ],
+   "worn": [
+    0.03,
+    0.03,
+    0.031
+   ],
+   "base_rough": 0.56,
+   "base_metal": 0.0,
+   "worn_metal": 0.0,
+   "worn_rough": 0.32,
+   "wear": 0.6,
+   "polish": 0.8,
+   "dust": 0.6,
+   "grime": 0.5,
+   "grain": 2,
+   "mottle": 0.03,
+   "rub": 0.6,
+   "scratches": 0.1
+  },
+  "9": {
+   "base": [
+    0.015,
+    0.015,
+    0.016
+   ],
+   "worn": [
+    0.03,
+    0.03,
+    0.031
+   ],
+   "base_rough": 0.52,
+   "base_metal": 0.0,
+   "worn_metal": 0.0,
+   "worn_rough": 0.3,
+   "wear": 0.6,
+   "polish": 1.0,
+   "dust": 0.5,
+   "grime": 0.5,
+   "grain": 2,
+   "mottle": 0.03,
+   "rub": 0.6,
+   "scratches": 0.1
+  },
+  "10": {
+   "base": [
+    0.15,
+    0.156,
+    0.16
+   ],
+   "worn": [
+    0.7,
+    0.71,
+    0.73
+   ],
+   "base_rough": 0.5,
+   "base_metal": 0.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.4,
+   "wear": 0.25,
+   "polish": 0.7,
+   "dust": 0.5,
+   "grime": 0.5,
+   "grain": 0,
+   "mottle": 0.08,
+   "rub": 0.1,
+   "scratches": 0.7
+  },
+  "11": {
+   "base": [
+    0.5,
+    0.48,
+    0.45
+   ],
+   "worn": [
+    0.5,
+    0.48,
+    0.45
+   ],
+   "base_rough": 0.4,
+   "base_metal": 1.0,
+   "worn_metal": 1.0,
+   "worn_rough": 0.4,
+   "wear": 0.0,
+   "polish": 0.0,
+   "dust": 0.4,
+   "grime": 0.3,
+   "grain": 4,
+   "mottle": 0.1,
+   "rub": 0.0,
+   "scratches": 0.0
+  },
+  "12": {
+   "base": [
+    0.02,
+    0.02,
+    0.02
+   ],
+   "worn": [
+    0.03,
+    0.03,
+    0.031
+   ],
+   "base_rough": 0.05,
+   "base_metal": 0.0,
+   "worn_metal": 0.0,
+   "worn_rough": 0.05,
+   "wear": 0.0,
+   "polish": 0.0,
+   "dust": 0.0,
+   "grime": 0.0,
+   "grain": 4,
+   "mottle": 0.0,
+   "rub": 0.0,
+   "scratches": 0.0
+  },
+  "13": {
+   "base": [
+    0.017,
+    0.017,
+    0.017
+   ],
+   "worn": [
+    0.03,
+    0.03,
+    0.031
+   ],
+   "base_rough": 0.74,
+   "base_metal": 0.0,
+   "worn_metal": 0.0,
+   "worn_rough": 0.6,
+   "wear": 0.2,
+   "polish": 0.5,
+   "dust": 0.7,
+   "grime": 0.6,
+   "grain": 2,
+   "mottle": 0.03,
+   "rub": 0.3,
+   "scratches": 0.0
+  }
+ },
+ "hands": [
+  [
+   [
+    -15,
+    -40,
+    -160
+   ],
+   [
+    75,
+    40,
+    -45
+   ],
+   6.0
+  ],
+  [
+   [
+    225,
+    -40,
+    -40
+   ],
+   [
+    378,
+    40,
+    40
+   ],
+   8.0
+  ],
+  [
+   [
+    125,
+    -40,
+    -200
+   ],
+   [
+    215,
+    40,
+    -105
+   ],
+   8.0
+  ],
+  [
+   [
+    5,
+    -25,
+    18
+   ],
+   [
+    42,
+    25,
+    34
+   ],
+   4.0
+  ],
+  [
+   [
+    45,
+    -20,
+    -45
+   ],
+   [
+    75,
+    20,
+    -20
+   ],
+   4.0
+  ],
+  [
+   [
+    -175,
+    -30,
+    -2
+   ],
+   [
+    -95,
+    30,
+    22
+   ],
+   10.0
+  ]
+ ],
+ "knocks": [
+  [
+   "x",
+   400.0,
+   440.0
+  ],
+  [
+   "x",
+   -120.0,
+   -150.0
+  ],
+  [
+   "z",
+   -150.0,
+   -170.0
+  ],
+  [
+   "z",
+   70.0,
+   80.0
+  ]
+ ],
+ "stains": [
+  [
+   [
+    [
+     "x",
+     548.0,
+     568.0
+    ]
+   ],
+   0.8
+  ],
+  [
+   [
+    [
+     "x",
+     84.0,
+     92.0
+    ],
+    [
+     "x",
+     116.0,
+     108.0
+    ],
+    [
+     "z",
+     -4.0,
+     4.0
+    ],
+    [
+     "y",
+     -8.0,
+     -12.0
+    ]
+   ],
+   0.65
+  ]
+ ],
+ "mark_color": [
+  0.55,
+  0.55,
+  0.53
+ ],
+ "dust_color": [
+  0.4,
+  0.34,
+  0.25
+ ],
+ "soot_color": [
+  0.012,
+  0.011,
+  0.01
+ ],
+ "lens": {
+  "color": [
+   0.35,
+   0.08,
+   0.03
+  ],
+  "roughness": 0.04,
+  "metalness": 1.0
+ },
+ "grain_sets": [
+  [
+   "Metal027",
+   "2k",
+   0.8,
+   5.0,
+   0.35,
+   5.0
+  ],
+  [
+   "Metal063",
+   "2k",
+   0.35,
+   10.0,
+   0.4,
+   6.0
+  ],
+  [
+   "Plastic013A",
+   "2k",
+   null,
+   null,
+   0.5,
+   4.0
+  ]
+ ],
+ "photos": {
+  "fingerprints": [
+   "Fingerprints008",
+   "2k",
+   "opacity"
+  ],
+  "chips": [
+   "Metal021",
+   "2k",
+   "displacement"
+  ],
+  "scratches": [
+   "Metal008",
+   "1k",
+   "rough"
+  ]
+ },
+ "blender_means": {
+  "Metal027": {
+   "colour": 0.18746207654476166,
+   "rough": 0.6490688323974609
+  },
+  "Metal063": {
+   "colour": 0.42666640877723694,
+   "rough": 0.13409732282161713
+  },
+  "Plastic013A": {
+   "colour": null,
+   "rough": 0.40016523003578186
+  },
+  "fingerprints": 0.17670239508152008,
+  "chips": 0.8584926128387451,
+  "scratches": 0.23603448271751404
+ },
+ "maps": {
+  "normal": "carbine_normal.png",
+  "masks_a": "carbine_masks_a.png",
+  "masks_b": "carbine_masks_b.png",
+  "id": "carbine_id.png",
+  "marks": "carbine_marks.png",
+  "relief": "carbine_relief.png"
+ },
+ "size": 4096
+}
