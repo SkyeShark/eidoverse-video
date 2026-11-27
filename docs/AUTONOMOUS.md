@@ -50,6 +50,28 @@ python3 eido_blender.py render work/<id>/scene.json          # the film: H.264 +
 - The parent's `--timeout-min` stops the run when time is up: render the film once the stills are
   right, and leave time for it (`bench` tells you how much).
 
+## After the film renders
+
+The finishing tools run in the image too (numpy, Pillow, librosa, stable-ts, ffmpeg), on the mp4,
+after `merge_av.py`:
+
+```bash
+python3 song_clock.py work/<id>/song.wav --out work/<id>/song_clock.json        # beats, bars, lines, in frames
+python3 song_clock.py work/<id>/song.wav --offset work/<id>/film.mp4           # 0 ms when the mux is right
+python3 film_print.py work/<id>/film.mp4 --out work/<id>/film_print.mp4 --parts 4   # if the brief asks for film
+python3 contact_sheet.py work/<id>/film.mp4 --lines --timeline work/<id>/song_clock.json \
+    --beats work/<id>/song_clock.json --png
+```
+
+- `film_print.py` (a 1970s or 1960s release print) is a look, not a step every film takes: use it when
+  the brief wants an old film's print. It runs last, after any neural pass; see
+  `tools-guides/postprocessing.md` ("After the render: the release print").
+- The line-by-line sheet is the parent's quickest read of a song film: leave it beside the final mp4
+  (`--png`, since the parent collects PNGs).
+- A singing mouth from a vocal stem: `characters.lipsync.visemes_from_vocal` in the scene
+  (`tools-guides/claudesona.md`). `blender/tests/finishing/` is a whole example: copy its
+  `scene.json` into `work/<id>/` and point `outputVideo` there, since `blender/` is read-only here.
+
 ## How the run ends
 
 - Finish with a playable final `.mp4` in `work/<short_id>/` and a `plan.md` saying what the film is,
