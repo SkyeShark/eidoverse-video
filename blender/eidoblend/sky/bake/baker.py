@@ -256,8 +256,16 @@ class SkyBaker:
                 block[row, :len(v)] = v
             row += n
         ubo = gpu.types.GPUUniformBuf(gpu.types.Buffer('FLOAT', block.size, block.ravel()))
+        # the draw state this full-screen triangle needs, set here: whatever drew last may have left its own (a volume
+        # probe bake, lightprobe_cache_bake, leaves the depth test at LESS_EQUAL with depth writes on, and the sky then
+        # bakes black); the state found is put back after
+        was = (gpu.state.depth_test_get(), gpu.state.depth_mask_get(), gpu.state.blend_get())
         try:
             with off.bind():
+                gpu.state.depth_test_set('NONE')
+                gpu.state.depth_mask_set(False)
+                gpu.state.blend_set('NONE')
+                gpu.state.face_culling_set('NONE')
                 fb = gpu.state.active_framebuffer_get()
                 fb.clear(color=(0.0, 0.0, 0.0, 0.0))
                 sh.bind()
@@ -282,6 +290,9 @@ class SkyBaker:
                 out[:] = np.asarray(buf, dtype=np.float32).reshape(height, width, 4)
         finally:
             off.free()
+            gpu.state.depth_test_set(was[0])
+            gpu.state.depth_mask_set(was[1])
+            gpu.state.blend_set(was[2])
         return out
 
     def _common(self):
