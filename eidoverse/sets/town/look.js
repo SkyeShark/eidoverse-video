@@ -763,7 +763,9 @@ export async function makeLook(THREE, { strikes = [], paved = [450, 160], sandRe
         m.roughnessNode = num(rgh);
         m.metalnessNode = num(metal);
         if (base === 'car') { m.clearcoat = 0.7; m.clearcoatRoughness = 0.12; }
-        if (['plant', 'fabric'].includes(base)) m.side = THREE.DoubleSide;
+        // (open shells drawn from both sides, as EEVEE draws them: leaves, cloth, and painted sheet metal such as a
+        // dish's bowl seen from behind)
+        if (['plant', 'fabric', 'paint'].includes(base)) m.side = THREE.DoubleSide;
         m.name = 'town.' + key.replace(':', '_');
         mats.set(key, m);
         return m;
