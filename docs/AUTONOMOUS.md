@@ -117,6 +117,41 @@ The houseplants build inside `setup()` in a second or two:
   added: say so in `plan.md` and use another place (the kitchen bakes without it).
 - Look at a still from the room's wide camera before you stage anything in it.
 
+## The WAKE ANOTHER ONE hall
+
+The hall builds inside `setup()`. The whole hall takes 72 s with its look and probe bake (a 10 GB
+peak); `small=True` takes 45 s. Its CC0 sets and models are fetched into the shared library on
+first use. Its machines are custom properties: key them with `hall.animate` on your clock
+(`tools-guides/props-and-sets.md`, "The WAKE ANOTHER ONE hall"):
+
+```python
+from eidoblend.sets.wake_another_one import hall
+H = hall.build()                               # trees=False when the image has no SeedThree
+hall.animate({'run': [(1, 0.0), (240, 3.0)], 'meter': [(1, 3861), (96, 0)]})
+H.bake_sky('cam_dock', f0, f1)                 # the sky, again for every camera; never Sky.bake directly
+```
+
+- Bake the sky through `H.bake_sky`. Called directly after the volume probe bake, the sky family's
+  sky bakes black.
+- Turn the hall's air off (`'haze': [(f, 0.0)]`) for close shots: it saves 2.5 to 3.5 s a frame.
+
+## Crowds and marching columns
+
+A crowd is one object whatever its size (`tools-guides/characters.md`, "Crowds and columns"). Bake
+the donor's stride or clip in `setup()`, a few seconds for one VRM, and drop the donor:
+
+```python
+from eidoblend.characters import crowd, load_vrm
+me = load_vrm('claude_robot')
+cyc = crowd.stride_cycle(me, 'walk', bpm=116)   # the brief's tempo; held props and curl as it asks
+col = crowd.crowd_object('column', crowd.formation(3, 12, heading=90.0), crowd.column_group(cyc, ref_frame=f0))
+crowd.drop_donor(me)
+```
+
+- Put `ref_frame` on a downbeat of the song: the left heel strikes there.
+- Check one body's feet with `crowd.feet_slide` before rendering (the slip under 1 mm a frame), and
+  write the number in `plan.md`.
+
 ## How you render
 
 Inside the image these run right where you are (no `--local` needed):
