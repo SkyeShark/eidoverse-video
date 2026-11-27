@@ -310,6 +310,16 @@ M += [bl('sets_uf_race_bin', 'test_race.py', '--build-only'), bl('sets_uf_race_b
 M += [py('voice_machines_a', 'test_screens_parity.py'),
       bl('voice_machines_a', 'test_machines.py', NR), bl('voice_machines_a', 'test_instances_clock_ortho.py', NR),
       bl('voice_machines_b', 'run_all.py', why='every voice-machines-b test in one Blender process (checks)')]
+# the hard-surface kit, the carbine and the helicopter: each area builds in Blender (no render), bakes in system Python
+# on the GPU (warp-lang; SKIP without it), then renders its stills
+M += [bl('props_hardsurface', 'test_kit.py'),
+      T('gpy', 'props_hardsurface', 'test_bake.py', cap=8, vram=2, why='the kit sample\'s high baked onto its low on the GPU'),
+      gpu('props_hardsurface', 'test_stills.py')]
+M += [bl('props_carbine', 'test_build.py', timeout=3600),
+      T('gpy', 'props_carbine', 'test_bake.py', cap=16, vram=4, why='the carbine\'s decals and its GPU bake with its layers'),
+      gpu('props_carbine', 'test_look.py')]
+M += [py('props_helicopter', 'test_decals.py'), bl('props_helicopter', 'test_build.py', timeout=3600),
+      gpu('props_helicopter', 'test_stills.py')]
 M += [py('xr', 'test_xr_serve.py'), py('xr', 'test_xr_quest.py'),
       bl('xr', 'test_xr_survey.py'), bl('xr', 'test_xr_pointer_tracks.py'),
       bl('xr', 'test_xr_city.py', NR), bl('xr', 'test_xr_features.py', NR, cap=16),
@@ -470,7 +480,9 @@ WIRING = ('characters.controller.Locomotion', 'characters.maneuvers.vault_over',
           'sdf.vehicles.make_vehicle', 'sdf.nuclear_explosion.NuclearExplosionFX', 'sdf.light_from_emission',
           'weather.make_weather_system', 'materials.procedural.noise', 'course.template.setup', 'course.EXAMPLES',
           'fabrication.print', 'fabrication.rotary.rotary_carve', 'fabrication.rotary_carve', 'fabrication.EXAMPLES',
-          'props.build', 'props.voice_machines.MACHINES', 'props.tandem.build', 'sets.build', 'sets.daisy.BAR',
+          'props.build', 'props.voice_machines.MACHINES', 'props.tandem.build', 'props.carbine.build',
+          'props.helicopter.spin', 'props.hardsurface.masses.finish_forged', 'materials.layered.baked_material',
+          'look.studio.studio', 'sets.build', 'sets.daisy.BAR',
           'sets.unknown_force.SETS', 'xr.export_xr', 'xr.export.survey_xr', 'xr.EXAMPLES',
           'look.post.custom_effects.apply_to', 'look.post.chain.add_stage', 'look.camera.make_camera',
           'media.screens.make_screen', 'media.overlay.chain_overlay', 'harness.keying.node_inputs',

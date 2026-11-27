@@ -24,6 +24,11 @@ subpackages load on first use.
 | [blender/README.md](../blender/README.md) | The edition's layout, families and tests | [development](../tools-guides/development.md) |
 | [blender/tools/vrm_turntable.py](../blender/tools/vrm_turntable.py) | Blender CLI: VRM outfit, clip, face and PBR sheets, spin reels | [claudesona](../tools-guides/claudesona.md) |
 | [blender/tools/render_motion.py](../blender/tools/render_motion.py) | Blender CLI: a built film's motion vectors for DLSS 5 (EEVEE's Vector pass, one animation render a shot) as `dlss5nr` motion files, with the shots' first frames in `cuts.txt` | [postprocessing](../tools-guides/postprocessing.md) |
+| [blender/tools/gpu\_bake.py](../blender/tools/gpu_bake.py) | CLI (system Python + NVIDIA Warp): a high baked onto its low on the GPU: normal, AO, cavity, curvature, edge and corner maps, ID, proofs | [blender](../tools-guides/blender.md) |
+| [blender/tools/grid\_crop.py](../blender/tools/grid_crop.py) | CLI (Pillow): a reference photograph's crop under a millimetre grid, for reading a part's outline as numbers | [blender](../tools-guides/blender.md) |
+| [blender/tests/props\_hardsurface/](../blender/tests/props_hardsurface/) | The hard-surface kit on a sample block, its GPU bake checked map by map, three stills under the layered material | [blender](../tools-guides/blender.md) |
+| [blender/tests/props\_carbine/](../blender/tests/props_carbine/) | The carbine built, prepared, baked and looked at | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [blender/tests/props\_helicopter/](../blender/tests/props_helicopter/) | The helicopter's pictures, its build, masks, materials and rotors, three stills | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [blender/examples/obstacle_course/scene.py](../blender/examples/obstacle_course/scene.py) | Scene example: the walking course (`eidoverse/examples/obstacle_course.js`), aporia driven by the character controller through `course.template` | [geometry](../tools-guides/geometry.md), [controller](../tools-guides/controller.md) |
 | [blender/examples/claude_robot/scene.py](../blender/examples/claude_robot/scene.py) | Scene example: the robot body's example (`eidoverse/examples/claude_robot.js`) as a film through the runner, `claude_robot_example()` at its own 30 fps and 8 s | [robot-body](../tools-guides/robot-body.md) |
 | [blender/tests/run_all.py](../blender/tests/run_all.py) | Test runner: every area's tests in one run, PASS / FAIL per test (`--kinds imports` checks the package's wiring in seconds) | [development](../tools-guides/development.md) |
@@ -268,6 +273,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [frame\_stats.py](../blender/eidoblend/look/frame_stats.py) | CLI and module: what rendered frames measure as (highlights, black and frozen frames, luma jumps), contact sheets | [render-review](../tools-guides/render-review.md) |
 | [overlap.py](../blender/eidoblend/look/overlap.py) | Exact mesh-against-mesh interpenetration of the posed meshes | [render-review](../tools-guides/render-review.md) |
 | [audit.py](../blender/eidoblend/look/audit.py) | The look family's audit ledger for checks run outside the runner | [render-review](../tools-guides/render-review.md) |
+| [studio.py](../blender/eidoblend/look/studio.py) | The judging room for an asset's look: softboxes the lens never sees, key and rim, an 18 % grey ball and a mirror ball | [blender](../tools-guides/blender.md) |
 | [post/\_\_init\_\_.py](../blender/eidoblend/look/post/__init__.py) | The post chain (its slots prebloom, bloom, under, overlay, over), the effect registry and its passes | [postprocessing](../tools-guides/postprocessing.md) |
 | [post/chain.py](../blender/eidoblend/look/post/chain.py) | The compositor graph in a fixed order, the WebGPU post chain's | [postprocessing](../tools-guides/postprocessing.md) |
 | [post/custom\_effects.py](../blender/eidoblend/look/post/custom_effects.py) | The effect registry: every WebGPU effect by name, `apply_to` / `register` | [postprocessing](../tools-guides/postprocessing.md) |
@@ -286,6 +292,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [\_\_init\_\_.py](../blender/eidoblend/materials/__init__.py) | Procedural textures and PBR material factories | [procedural-materials](../tools-guides/procedural-materials.md) |
 | [procedural.py](../blender/eidoblend/materials/procedural.py) | `procedural_materials.js`: generators, height-to-normal, compositing, the six factories | [procedural-materials](../tools-guides/procedural-materials.md) |
 | [\_gen.py](../blender/eidoblend/materials/_gen.py) | The canvas maths in numpy (no bpy) | [procedural-materials](../tools-guides/procedural-materials.md) |
+| [layered.py](../blender/eidoblend/materials/layered.py) | ONE layered material on a baked asset's maps (`baked_material`, `Substrate`, `load_bake`), and `NT`, the node-building layer asset looks are written in | [procedural-materials](../tools-guides/procedural-materials.md) |
 
 ### Screens, type, books and sound (`eidoblend.media`)
 
@@ -325,8 +332,22 @@ git-ignored `out/`); `run_all.py --list` names them all.
 
 | Module | Role | Instructions |
 | --- | --- | --- |
-| [\_\_init\_\_.py](../blender/eidoblend/props/__init__.py) | The DAISY props by name: eight historical voice machines (1939–2001) and the 1896 tandem; the era kit for new props in their style | [voice-machines](../tools-guides/voice-machines.md), [props-and-sets](../tools-guides/props-and-sets.md) |
+| [\_\_init\_\_.py](../blender/eidoblend/props/__init__.py) | The props by name: eight historical voice machines (1939–2001), the 1896 tandem, the carbine and the helicopter; the era kit for new props in their style; the hard-surface kit | [voice-machines](../tools-guides/voice-machines.md), [props-and-sets](../tools-guides/props-and-sets.md) |
 | [tandem.py](../blender/eidoblend/props/tandem.py) | The 1896 tandem, its VRM rider rig and springs, the teapot stoker | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [hardsurface/\_\_init\_\_.py](../blender/eidoblend/props/hardsurface/__init__.py) | The hard-surface kit: a measured high, a low from the same tables, a GPU bake, one layered material | [blender](../tools-guides/blender.md) |
+| [hardsurface/masses.py](../blender/eidoblend/props/hardsurface/masses.py) | The mass constructor: prisms intersected, features unioned, cutters through, one bevel per edge group (`tagged`, `finish_forged`), the low from the same tables | [blender](../tools-guides/blender.md) |
+| [hardsurface/sections.py](../blender/eidoblend/props/hardsurface/sections.py) | A lofted body from control sections (`Body`, `stations`; no bpy) | [blender](../tools-guides/blender.md) |
+| [hardsurface/skins.py](../blender/eidoblend/props/hardsurface/skins.py) | Lofted skins and their openings: `loft_body`, `Surface`, `border`, `frame`, `screws`, `pane` | [blender](../tools-guides/blender.md) |
+| [hardsurface/lowpoly.py](../blender/eidoblend/props/hardsurface/lowpoly.py) | A low finished for its bake: region-weighted normals, hard edges as seams, islands cut to disks, one texel density, the pack | [blender](../tools-guides/blender.md) |
+| [hardsurface/uv\_pack.py](../blender/eidoblend/props/hardsurface/uv_pack.py) | The raster UV packer (58-78 % of the square) | [blender](../tools-guides/blender.md) |
+| [hardsurface/bake\_export.py](../blender/eidoblend/props/hardsurface/bake_export.py) | The GPU baker's inputs: `write_high`, `write_low` | [blender](../tools-guides/blender.md) |
+| [hardsurface/chain.py](../blender/eidoblend/props/hardsurface/chain.py) | An asset's build chain from plain Python: Blender steps, the bake, `EIDO_GPU_WRAP` (stdlib) | [blender](../tools-guides/blender.md) |
+| [carbine/\_\_init\_\_.py](../blender/eidoblend/props/carbine/__init__.py) | An M4A1-pattern carbine: `build()` appends the made asset; `high`, `front`, `top`, `grip`, `details` build it, `decals` and `layers` draw and bake its data, `look` its material and condition | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [carbine/cli.py](../blender/eidoblend/props/carbine/cli.py) | Blender CLI: the carbine's high, low, prep, look and stills | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [carbine/make.py](../blender/eidoblend/props/carbine/make.py) | CLI: the carbine made from nothing, step by step (stdlib) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [helicopter/\_\_init\_\_.py](../blender/eidoblend/props/helicopter/__init__.py) | A UH-60-pattern helicopter: `build()` appends the made asset, `spin()` keys its rotors; `datum`, `high` and its assemblies build it, `decals` draws its pictures, `look` its masks and materials | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [helicopter/cli.py](../blender/eidoblend/props/helicopter/cli.py) | Blender CLI: the helicopter's high, look and stills | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [helicopter/make.py](../blender/eidoblend/props/helicopter/make.py) | CLI: the helicopter made from nothing, step by step (stdlib) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [voice\_machines/\_\_init\_\_.py](../blender/eidoblend/props/voice_machines/__init__.py) | The registry (`build(name)`), the screens and the era-2 kit the machines share | [voice-machines](../tools-guides/voice-machines.md) |
 | [voice\_machines/voder.py](../blender/eidoblend/props/voice_machines/voder.py) | The 1939 Voder, and the era-1 craft kit (role materials, a 2D canvas, three geometries, the keyer) | [voice-machines](../tools-guides/voice-machines.md) |
 | [voice\_machines/mainframe.py](../blender/eidoblend/props/voice_machines/mainframe.py) | The 1961 computer room | [voice-machines](../tools-guides/voice-machines.md) |

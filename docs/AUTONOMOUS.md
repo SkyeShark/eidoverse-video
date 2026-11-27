@@ -31,6 +31,29 @@ CC0 foley instead. Never fake a tool call; degrade honestly and say so in your r
   creatures, humans and accessories as glb files that import into Blender as assets; what each is:
   `eidoverse/bestiary/README.md`). Import them into your scene; never change or move them.
 
+## Props made before the scene
+
+The helicopter is made once into a file, then appended; `setup()` does not build it
+(`tools-guides/props-and-sets.md`, "The helicopter"). Make it in your folder, since its default
+`work/props/` is not yours (about 3 minutes, before the first still):
+
+```bash
+python3 blender/eidoblend/props/helicopter/make.py --out work/<id>/helicopter
+```
+
+```python
+import os
+from eidoblend.props import helicopter
+heli = helicopter.build(ctx=ctx, blend=os.path.join(ctx.scene_dir, 'helicopter', 'helicopter.blend'))
+heli.group.location = (0.0, 0.0, 70.0)                     # its root: key it to fly
+heli.spin(ctx.frame_start, ctx.frame_end, fps=ctx.fps)     # the rotors turning, LINEAR keys
+```
+
+- The carbine cannot be made here. Its chain bakes the high onto the low with
+  `blender/tools/gpu_bake.py`, which needs `warp-lang`, and the image does not install it, so
+  `blender/eidoblend/props/carbine/make.py` stops before the bake with exit code 3. If the brief
+  needs the rifle, say so in `plan.md` and keep it out of the shot.
+
 ## How you render
 
 Inside the image these run right where you are (no `--local` needed):

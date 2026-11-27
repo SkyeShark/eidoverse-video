@@ -141,6 +141,62 @@ low raking light (`pm_raking.png`). `test_pm_parity.py` (system Python and
 deno, no Blender) holds every generator, composite and factory map against
 the engine's own canvas.
 
+## A layered material on baked maps
+
+`eidoblend.materials.layered` is the other half of the hard-surface kit
+([blender](blender.md#high-to-low-baked-on-the-gpu)): ONE material that reads
+an asset's GPU bake and builds its surface the way a working object gets it,
+layer over layer, each a whole material blended by one factor, each factor
+from a cause. It is native to this edition (no WebGPU original).
+
+```python
+from eidoblend.materials import layered as LY
+
+maps = LY.load_bake('work/block/bake', 'block')         # normal, masks_a, masks_b, id (+ marks, relief), packed
+subs = {1: LY.Substrate(base=(0.026, 0.031, 0.033), worn=(0.70, 0.71, 0.73), base_rough=0.46, worn_metal=1.0,
+                        worn_rough=0.30, wear=1.0, polish=0.6, dust=0.6, grime=0.7, grain=0, mottle=0.05, rub=1.3,
+                        scratches=0.6),                  # hard-anodised aluminium
+        5: LY.Substrate((0.048, 0.046, 0.041), (0.50, 0.50, 0.52), 0.66, 0.0, 1.0, 0.36, 0.9, 0.5, 0.6, 0.8, 1, 0.09, 0.8, 0.2)}
+mat = LY.baked_material('block.layered', maps, subs,
+                        hands=[((0, -25, 0), (60, 25, 65), 6.0)],       # soft boxes (mm) where hands go
+                        knocks=[('x', 100.0, 120.0)],                  # ramps (mm): the extremities knocks reach
+                        stains=[([('x', 110.0, 120.0)], 0.5)],         # products of ramps, each with an amount
+                        condition={'wear': 1.0, 'dust': 1.0, 'grime': 1.0, 'polish': 1.0})
+```
+
+The layers, in order:
+
+| Layer | Its cause | Driven by |
+| --- | --- | --- |
+| substrate | what the part is made of | the baked ID through 16 x 1 tables (one per column of `Substrate`), the grain of a CC0 photograph laid in the asset's millimetres by box projection: `grain` 0 anodised aluminium's satin (ambientCG Metal027), 1 phosphated steel's crystal (Metal063), 2 a moulded polymer's smudged roughness (Plastic013A), 4 none; a slow mottle, fine scratches (Metal008) |
+| markings | printed or painted at real size | the bake's `marks` map, a pale fill under the wear |
+| grime | dirt that settles where air does not move | AO and the short cavity |
+| wear | knocks and rubbing | the exposed-edge map and curvature: a RUB (paler, smoother) within about 1.3 mm of an arris, a CHIP to what lies beneath within about 0.4 mm, its outline broken by a photographed chip pattern (Metal021), only where knocks go: open places (AO) and the asset's extremities (`knocks`) |
+| handling | hands | polish and fingerprints (Fingerprints008) inside the `hands` boxes |
+| dust | settling | the cavities and what faces up in the asset's own space; on near-black a third opaque, never a coat |
+| stains | their own causes | carbon at a muzzle, behind a port: `stains` |
+
+Then cavity and AO go into the colour (EEVEE's own occlusion reaches only
+screen scale), the baked normal map is applied, and a whisper of bump gives a
+chip its lip and the dust its film. Every number is the `Substrate`'s or the
+call's; `condition` scales wear, polish, dust and grime together (0.3 nearly
+new, 1.6 hard used). The masks are also AOVs (`ao`, `cavity`, `curv`,
+`edge`, `chip`, `dust`, `hands`) for probes. The photographs are fetched into
+the shared library on first use (`photos()`, `harness.assets.fetch_pbr`), and
+the bake's maps and tables are packed, so a saved file renders on its own.
+
+`NT` is the layer the stack is written in, for an asset's own layers:
+maths, smoothstep (`sm`), linear maps (`lin`), mixes (`mixf`, `mixc`), value
+(`value`), noise and Voronoi, the point and the normal in the asset's space in
+millimetres (`pos_mm`, `nrm`), images (`tex`, `box`), and `picture(spec,
+facing=)`: a picture drawn at real size laid square through its own rectangle
+on the faces that look one way (a picture for the far side runs its rectangle
+backwards, so it is never mirrored).
+
+An asset rendered as its HIGH, without a low or a bake (the helicopter), keeps
+its masks on its own vertices instead and a layer stack of its own reads them:
+`eidoblend.props.helicopter.look` ([props and sets](props-and-sets.md#the-helicopter)).
+
 ## Not yet ported
 
 Nothing of `procedural_materials.js` is left out. Two differences in kind:

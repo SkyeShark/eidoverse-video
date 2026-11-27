@@ -6,7 +6,15 @@
 
 Guide: tools-guides/procedural-materials.md. The numpy core (materials/_gen.py) imports no bpy and matches
 the engine's canvas byte for byte on its per-pixel generators (blender/tests/terrain_extras/test_pm_parity.py).
+
+    from eidoblend.materials import layered as LY               # ONE layered material on a baked asset's maps
+    mat = LY.baked_material('prop.layered', LY.load_bake(bake_dir, 'prop'), {1: LY.Substrate(...)})
+
+materials.layered (imported on first use) reads what blender/tools/gpu_bake.py bakes; its NT is the node-building
+layer asset looks are written in.
 """
+import importlib
+
 from . import procedural  # noqa: F401
 from .procedural import (FACTORIES, composite, computer_plastic_90s, create_fabric, create_painted_metal,  # noqa: F401
                          create_rubber, create_scaly, create_skin, create_worn_metal, grain, height_to_normal, help,
@@ -14,4 +22,11 @@ from .procedural import (FACTORIES, composite, computer_plastic_90s, create_fabr
 
 __all__ = ['procedural', 'scratches', 'smudges', 'noise', 'voronoi', 'patches', 'pores', 'weave', 'grain',
            'height_to_normal', 'composite', 'create_painted_metal', 'create_rubber', 'create_skin', 'create_scaly',
-           'create_fabric', 'create_worn_metal', 'computer_plastic_90s', 'mesh_material', 'FACTORIES', 'help']
+           'create_fabric', 'create_worn_metal', 'computer_plastic_90s', 'mesh_material', 'FACTORIES', 'help', 'layered']
+
+
+def __getattr__(name):
+    """materials.layered, imported on first use."""
+    if name == 'layered':
+        return importlib.import_module(f'{__name__}.layered')
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

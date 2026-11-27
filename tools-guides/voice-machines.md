@@ -44,7 +44,8 @@ import bpy
 from eidoblend import props
 from eidoblend.props import voice_machines as VM
 
-props.NAMES          # ['voder', 'mainframe', 'teletype', 'speakspell', 'c64', 'mac1984', 'dectalk', 'desktop2001', 'tandem']
+props.NAMES          # ['voder', 'mainframe', 'teletype', 'speakspell', 'c64', 'mac1984', 'dectalk', 'desktop2001', 'tandem',
+                     #  'carbine', 'helicopter']
 c64 = props.build('c64', screen_dir='//screens/c64')       # or VM.build_machine('c64', {...}), or c64.build()
 c64.group.location = (0.0, 0.0, 0.74)                      # the root Empty: on a desk top
 c64.parts['screen'].set_text(['READY.', 'SAY "I WAS A MOUTH"', 'I WAS A MOUTH', 'READY.'], True)
