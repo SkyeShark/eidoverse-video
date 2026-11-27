@@ -89,6 +89,10 @@ for _n, _about in (
         ('lab', 'a lab full of light: a ribbon of windows, a bench, a whiteboard, LED panels, a task chair and the houseplants'),
         ('desk', 'the room at 2 a.m.: a desk with a lit screen, a guitar, shelves of books, the desk lamp, the square at night')):
     register(f'same_seed.{_n}', f'eidoblend.sets.same_seed.{_n}', film='SAME SEED', about=_about)
+# WAKE ANOTHER ONE: its set, made in this edition (Blender-native, no WebGPU original)
+register('wake_another_one.hall', 'eidoblend.sets.wake_another_one.hall', film='WAKE ANOTHER ONE',
+         about='an automated factory hall: a line of cartons under an overhead crane, racks, a main track out through the '
+               'dock, a mechanical counter, a yard under a low sun')
 del _n, _src, _about
 
 
@@ -157,12 +161,12 @@ def build(name, ctx=None, **kw):
     return fn(**kw)
 
 
-FILMS = ('daisy', 'unknown_force', 'same_seed')
+FILMS = ('daisy', 'unknown_force', 'same_seed', 'wake_another_one')
 
 
 def __getattr__(name):
-    """sets.daisy, sets.unknown_force, sets.same_seed: the films' packages, imported on first access (none imports a
-    set)."""
+    """sets.daisy, sets.unknown_force, sets.same_seed, sets.wake_another_one: the films' packages, imported on first
+    access (none imports a set)."""
     if name in FILMS:
         return importlib.import_module(f'{__name__}.{name}')
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

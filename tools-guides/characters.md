@@ -32,8 +32,8 @@ key_expression(me, 'happy', [(1, 1.0)])
 ```
 
 This guide is the character layer itself: loading a VRM, its clips, the
-planted-feet walk, the face, and my robot body's joints. The rest of the
-family has its own guides:
+planted-feet walk, the face, my robot body's joints, and crowds and marching
+columns of any VRM. The rest of the family has its own guides:
 
 - **[The character controller](controller.md)** (`characters.controller`): a
   directed take on any ground: walks, runs, stairs and ramps found by its own
@@ -518,6 +518,111 @@ the bones `petal_00` … `petal_11`; a fold of φ degrees is the basis
 
 — Claude (Opus 5.5), with Skye
 
+## Crowds and columns — `crowd`
+
+A crowd is ONE object: a point a body, and a Geometry Nodes modifier that
+shows on every point a pose from a flipbook of baked poses of one donor VRM.
+The poses are plain meshes, so a frame change costs milliseconds whatever the
+count. Measured on my body (109,348 vertices a pose, 50 poses a stride, the
+flipbook about 0.8 GB of VRAM): 300 marching bodies render in 0.36 s a frame
+and 1,200 in 0.77 s (960 × 540, 16 samples, the frame change 2–3 ms).
+
+```python
+from eidoblend.characters import crowd, load_vrm
+me = load_vrm('claude_robot')                                   # the donor: any VRM
+lamp = crowd.HeldProp(bpy.data.objects['lantern'], bone='rightHand', grip='fist', hang=True)
+cyc = crowd.stride_cycle(me, 'walk', bpm=116, poses_per_frame=2, props=[lamp], curl={'right': 80.0},
+                         face={'happy': 1.0})                   # ONE stride, feet planted, baked to 50 poses
+pts = crowd.formation(files=3, ranks=12, interval=0.85, distance=1.05, origin=(0, 0, 0), heading=90.0,
+                      jitter={'lateral': 0.03, 'along': 0.05, 'phase': 0.03, 'seed': 11})
+column = crowd.crowd_object('column', pts, crowd.column_group(cyc, ref_frame=1, show=(10, 400)))
+
+crowd.reset_donor(me)                                           # the same donor, a one-shot clip
+wave = crowd.once_flipbook(me, 'wave_goodbye', every=2)
+g = crowd.grid(lines=2, units=5, line_pitch=2.2, unit_pitch=1.25, origin=(0, 14, 0))
+crowd.crowd_object('wave', g, crowd.once_group(wave, hold=(64, 24)),
+                   starts=crowd.canon_starts(g, first=12, step_line=10, step_unit=4))
+crowd.drop_donor(me)                                            # only the flipbooks' plain meshes stay
+```
+
+- **The donor.** One body of the VRM is keyed once and baked; every body of
+  the crowd is that body doing that thing, set apart by its place, its phase
+  and its start. Whatever is on the donor when it is baked is on every body:
+  the face's expressions (`face=`), fingers closed round a handle (`curl=`,
+  degrees per hand in the VRM's normalized frame), held props.
+- **The flipbook.** Each pose is one plain mesh of the donor's meshes as
+  Blender evaluates them (the skin, the shape keys, the parts parented to a
+  bone), in the pose's own frame. Pose 0 is baked whole and every later pose
+  is a copy of it with its positions written over, so the poses share
+  topology, UVs, materials and the custom normals' layout (the bake checks
+  that every pose's corners name pose 0's vertices). Parts under a refracting
+  material are a second layer a pose: EEVEE sees nothing of an object's own
+  surfaces through its refraction, so my face screen joined to the glass dome
+  over it would vanish. The flipbook's collections are in no scene; the node
+  group names them, so appending the crowd's object brings them along.
+- **The stride** (`stride_cycle`). The donor walks a straight line on level
+  ground with `walk_path` (its feet planted), keyed at `poses_per_frame` times
+  the film's rate so a keyed frame is a pose, from the clip time its left heel
+  strikes, and one stride is baked in its steady state (after `warmup`
+  strides). A stride is two beats: the left heel strikes on beats one and
+  three, the right on two and four, so `ref_frame` is a downbeat. The stride's
+  film frames are rounded to a whole number of poses (116 bpm asked at 24 fps
+  and two poses a frame: 50 poses, 25 frames, 115.2 bpm used), so every film
+  frame shows every second pose and no body ever hitches. The poses are in a
+  frame that moves forward at the stride's mean speed, S metres a stride (its
+  own length, the clip's on this body: 1.4988 m on mine): a planted foot slides
+  back through the poses at exactly that speed, and the instancer carries a
+  body forward S × k / N for the k-th pose it shows, so every planted foot
+  stays where it landed. The record (`fb.record`): the stride, its frames,
+  the tempo used, both heel strikes, `seam_mm` (the pose one stride on against
+  the first: 0.003 mm on mine), `glass_parts`.
+- **Held props** (`HeldProp(source, bone, grip, hang, turn)`). Any Mesh,
+  Object or Collection made at its own origin, one object a pose in a
+  collection of its own, its matrix the hand bone's times `grip` (a Matrix,
+  `(x, y, z)`, `((x, y, z), (rx, ry, rz))` in degrees, or `'fist'`: the middle
+  of the four fingers' middle joints, inside a hand closed by `curl`).
+  `hang=True` keeps the prop plumb under the grip point (a lantern by its
+  bail, a bag, a bucket); otherwise it turns with the hand (a flag's pole in
+  the fist, a placard, a tool). The carbine (`eidoblend.props.carbine`) is one
+  more prop it can carry. A hold that fits both hands to a prop's surface is
+  not here (see Not yet ported).
+- **Loops in place** (`loop_cycle(h, 'chorus_sway', bpm=, beats=2)`): a
+  stationary clip's loop timed to so many beats, stride 0, played on the beat
+  by the same column group: a crowd that sways or dances where it stands.
+- **One-shot crowds and the canon** (`once_flipbook(h, clip, every=2)`,
+  `once_group`): every point plays the clip from its own `start`, folded at
+  its first pose before it and holding its last after it.
+  `canon_starts(points, first, step_line, step_unit)`: start = first +
+  step_line × the line's place + step_unit × the unit's place in its line.
+- **The node groups.** `column_group(fb, ref_frame, show, hold,
+  frame_offset)`: per point, phase = (frame + Frame Offset − Ref Frame) /
+  Stride Frames + its `dphase`; k = floor(N × phase + 0.5); the pose shown
+  k mod N; the point carried Stride × k / N along its heading. `once_group(fb,
+  show, hold, frame_offset)`: the pose clamp(floor((frame − start) / Every), 0,
+  Poses − 1). Both: Show From / Show To (outside them the points are deleted),
+  the hold (Hold From, Hold Frames: every body stops on Hold From, holds that
+  pose Hold Frames frames and carries on from where it held) and a point's own
+  `stop` (from that frame it holds for good). The group's inputs are on the
+  modifier, so they key like any input.
+- **The points.** `formation(files, ranks, interval, distance, origin,
+  heading, jitter)` (a column at its phase 0: `heading` 0 marches toward −Y, a
+  VRM's front; jitter in spacing and phase, uniform in ± each), `grid(lines,
+  units, line_pitch, unit_pitch, origin, heading)`, and `crowd_object(name,
+  points, group, starts=, stops=)`, which writes the attributes the groups
+  read: `yaw` (radians: the body's front, −Y, turned by it), `dphase`
+  (strides), `start`, `stop`, and keeps `rank`, `file`, `line`, `unit`.
+- **The checks.** `instances_at(ob, frame, prefix)`; `feet_slide(ob, fb,
+  frames, point)`: one body's planted feet in the world, frame after frame,
+  the slip of the contact (the least move among its vertices within 2.5 mm of
+  the floor on two frames running while the foot touches: a sole rolling about
+  its heel or ball keeps that point still; a heel still coming down or a toe
+  lifting is not planted); `shown_poses(ob, fb, frame)`: the pose every point
+  shows against the one its attributes ask for.
+- **Limits.** The poses are rigid, so a crowd walks on level ground (a
+  point's z is its floor's height) and in straight lines. EEVEE's motion blur
+  on instances that switch meshes is for the shot to judge: render crowd
+  frames with it off if it smears.
+
 ## Checks — T-pose, slide, a face that never moved
 
 The WebGPU edition audits at render time (`[vrm-pose]`, `[lipsync]`, the
@@ -580,6 +685,19 @@ bash run_blender.sh blender/tests/characters/test_robot_walk.py      # from the 
 Each writes `out/<test>.json` (the report and the checks) and its `.blend`;
 `test_vrm_shadows.py` writes `out/vrm_shadows.blend` and its stills.
 
+The crowds have their own area, `blender/tests/characters_crowd/`:
+
+```bash
+bash run_blender.sh blender/tests/characters_crowd/test_crowd.py      # --no-render: the checks only; --bpm 116; --vrm NAME
+```
+
+`test_crowd.py` bakes my body's stride with a lantern in my right fist and a
+one-shot wave, then checks the stride (its length, its seam, the vertex
+order), the column's planted feet through 48 frames, the pose every point
+shows, a plumb lantern with every body, and the canon before, through and
+after its hold, with one body stopped alone. Its four stills (`out/crowd_*.png`):
+the column from the kerb and close on a lantern, the canon wide and close.
+
 ## Not yet ported
 
 So nothing is silently dropped, what the WebGPU edition has and this one does
@@ -597,6 +715,12 @@ not yet:
   example's frame order:** my feet's clearance from each other inside a clip
   (`walk_path` places the feet apart itself) and the finger pins. Both run in
   `characters.robot.RobotRig` / `perform_robot` ([robot body](robot-body.md)).
+- **Crowds** (`crowd`): a two-handed hold fitted to a prop's surface (the
+  grip hand on the grip, the other cradling the fore-end, each finger closed
+  until it touches) on a stride; a column that turns a corner or climbs a
+  street (the poses are rigid, so it walks straight on level ground); bodies
+  of several donors in one crowd object (today each donor is a crowd object
+  of its own).
 - **The rest of the family keeps its own lists:** the controller's (a sneak
   with no crouched-walk clip, the backward walk on stairs, the stress course's
   stair hand-overs: [controller](controller.md#not-yet-ported)), the

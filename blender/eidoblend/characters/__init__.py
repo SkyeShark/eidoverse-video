@@ -19,7 +19,9 @@ claude_robot_dof.js whole), ground (foot_points, Ground, ground_vrm), locomotion
 performance (perform, key_face_track: a stationary clip through a body's frame order, baked), checks (the audits),
 clippy (make_clippy: tools-guides/clippy.md), springs (bake_springs, SpringRig: spring bones baked to keys), lookat
 (bake_look_at, LookAt: eyes on a target), lipsync (key_lipsync, visemes_from_audio), pose_bake (pose_bake.js's files,
-both ways).
+both ways), crowd (loaded on first use as characters.crowd: crowds and marching columns of any VRM, a Geometry Nodes
+flipbook of baked poses: stride_cycle, loop_cycle, once_flipbook, HeldProp, formation, grid, canon_starts,
+column_group, once_group, crowd_object).
 
 Subpackages (each imported on first use, as characters.<name> or `from eidoblend.characters import <name>`):
     controller  the character controller for film: VRMCharacterController, VRMFootControllerIK, Locomotion,
@@ -55,15 +57,16 @@ from .vrm import VRMHandle, load_vrm  # noqa: F401
 from .vrma import load_clip, play_vrma, play_vrma_default  # noqa: F401
 
 SUBPACKAGES = ('controller', 'emotes', 'maneuvers', 'robot', 'claudesona', 'robotics')
+LAZY_MODULES = ('crowd',)
 
 
 def __getattr__(name):
     """characters.controller, characters.robot ...: the subpackages, imported on first use (each is heavy, and robot
-    pulls in harness.navigation)."""
-    if name in SUBPACKAGES:
+    pulls in harness.navigation); characters.crowd, a module loaded the same way."""
+    if name in SUBPACKAGES or name in LAZY_MODULES:
         return importlib.import_module(f'{__name__}.{name}')
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
 
 
 def __dir__():
-    return sorted(set(globals()) | set(SUBPACKAGES))
+    return sorted(set(globals()) | set(SUBPACKAGES) | set(LAZY_MODULES))

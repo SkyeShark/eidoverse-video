@@ -136,6 +136,8 @@ M += [bl('characters', s, NR) for s in ('test_vrma_clips.py', 'test_robot_walk.p
 M += [bl('characters', 'test_vrm_shadows.py'), gpu('characters', 'test_vrm_shadows.py', '--render')]
 M += [bl('characters', 'test_clippy_set_weight.py'), gpu('characters', 'test_clippy_set_weight.py', '--render')]
 M += [bl('characters', 'test_take_springs.py', NR, '--vrm', vrm, timeout=3600) for vrm in ('aporia', 'aletheia')]
+# crowds and marching columns: a stride and a one-shot baked to flipbooks, the instancers checked; then the stills
+M += [bl('characters_crowd', 'test_crowd.py', NR), gpu('characters_crowd', 'test_crowd.py')]
 M += [bl('claudesona', s, NR) for s in ('test_face.py', 'test_keyed_film.py', 'test_lipsync.py', 'test_lookat.py',
                                         'test_pbr_tuta.py', 'test_springs.py', 'test_tuta.py', 'test_tuta_aa.py',
                                         'test_wardrobe.py')]
@@ -325,6 +327,9 @@ M += [bl('props_carbine', 'test_build.py', timeout=3600),
       gpu('props_carbine', 'test_look.py')]
 M += [py('props_helicopter', 'test_decals.py'), bl('props_helicopter', 'test_build.py', timeout=3600),
       gpu('props_helicopter', 'test_stills.py')]
+# the WAKE ANOTHER ONE hall: its layout and machines (no render), then the small hall with its look and two stills
+M += [bl('sets_wake_another_one', 'test_hall.py', '--layout-only'),
+      gpu('sets_wake_another_one', 'test_hall.py', cap=20, vram=8, timeout=3600)]
 M += [py('xr', 'test_xr_serve.py'), py('xr', 'test_xr_quest.py'),
       bl('xr', 'test_xr_survey.py'), bl('xr', 'test_xr_pointer_tracks.py'),
       bl('xr', 'test_xr_city.py', NR), bl('xr', 'test_xr_features.py', NR, cap=16),
@@ -480,7 +485,7 @@ SCRIPTS = {'harness/run_scene.py', 'harness/doctor.py',     # scripts, run by ei
 # each family's subpackages and modules reached from its parent as attributes (the packages' lazy exports)
 WIRING = ('characters.controller.Locomotion', 'characters.maneuvers.vault_over', 'characters.emotes.seat_on',
           'characters.robot.VRMRobotBody', 'characters.claudesona.make_wardrobe', 'characters.robotics.make_robot',
-          'characters.bake_springs', 'characters.bake_look_at', 'characters.key_lipsync',
+          'characters.bake_springs', 'characters.bake_look_at', 'characters.key_lipsync', 'characters.crowd.stride_cycle',
           'fx.particle_morph.make_particle_morph', 'fx.particle_targets.target', 'fx.water3d.create_water_sim',
           'fx.water_flat.create_water_mesh', 'fx.stable_fluids.create_fluid_sim', 'sdf.create_sdf_object',
           'sdf.vehicles.make_vehicle', 'sdf.nuclear_explosion.NuclearExplosionFX', 'sdf.light_from_emission',
@@ -488,7 +493,7 @@ WIRING = ('characters.controller.Locomotion', 'characters.maneuvers.vault_over',
           'fabrication.print', 'fabrication.rotary.rotary_carve', 'fabrication.rotary_carve', 'fabrication.EXAMPLES',
           'props.build', 'props.voice_machines.MACHINES', 'props.tandem.build', 'props.carbine.build',
           'props.helicopter.spin', 'props.hardsurface.masses.finish_forged', 'materials.layered.baked_material',
-          'look.studio.studio', 'sets.build', 'sets.daisy.BAR',
+          'look.studio.studio', 'sets.build', 'sets.daisy.BAR', 'sets.wake_another_one.SETS',
           'sets.unknown_force.SETS', 'xr.export_xr', 'xr.export.survey_xr', 'xr.EXAMPLES',
           'look.post.custom_effects.apply_to', 'look.post.chain.add_stage', 'look.camera.make_camera',
           'media.screens.make_screen', 'media.overlay.chain_overlay', 'harness.keying.node_inputs',

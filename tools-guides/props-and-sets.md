@@ -20,6 +20,10 @@ and appended into a scene from the made file. Two places are native too: a
 concrete-frame town and the desert round it ([a town and the desert round
 it](#a-town-and-the-desert-round-it)).
 
+The set of the WAKE ANOTHER ONE music video is native to this edition as
+well: an automated factory hall whose machines run on keyed controls ([the
+hall](#the-wake-another-one-hall)).
+
 | Piece | Blender module | Section | WebGPU source | Assets (shared) |
 | --- | --- | --- | --- | --- |
 | The funeral: a bridge in fog, a warehouse vigil | `eidoblend.sets.daisy.funeral`, `.bridge` | [the funeral](#the-funeral), [the bridge](#the-bridge-in-fog) | [`sets/funeral.js`](../eidoverse/sets/funeral.js), [`funeral/bridge.js`](../eidoverse/sets/funeral/bridge.js) | [`sets/funeral/`](../eidoverse/assets/sets/funeral/README.md), `models/funeral_*.glb` |
@@ -31,6 +35,7 @@ it](#a-town-and-the-desert-round-it)).
 | The race and the bin | `eidoblend.sets.unknown_force.race`, `.bin`, `.bin_pages` | [the race and the bin](#the-race-and-the-bin) | `race.js`, `bin.js`, `bin_pages.js` | built in code; one CC0 trash can |
 | A concrete-frame town, its edge thinning into the plain; damage as an option | `eidoblend.sets.town` (`places.town`) | [the town](#the-town) | none (native) | built in code; 27 CC0 sets and 11 CC0 models fetched by ID |
 | The desert round a town, out to 32.8 km | `eidoblend.sets.desert` (`places.desert`) | [the desert](#the-desert-round-it) | none (native) | three terrain recipes run; 12 CC0 sets more |
+| The WAKE ANOTHER ONE hall: an automated factory hall, a line of cartons under an overhead crane, its machines driven by keyed controls | `eidoblend.sets.wake_another_one.hall` (`wake_another_one.hall`) | [the hall](#the-wake-another-one-hall) | none (native) | built in code; 8 CC0 sets and 4 CC0 models fetched by ID; SeedThree trees |
 | Eight historical voice machines, 1939–2001 | `eidoblend.props.build(name)` | [voice machines](voice-machines.md) | [`props/voice_machines/`](../eidoverse/props/voice_machines/index.js) | [`models/voice_machines/`](../eidoverse/assets/models/voice_machines/README.md) |
 | An 1896-pattern tandem, a rider rig, a teapot stoker | `eidoblend.props.tandem` | [the tandem](#the-1896-tandem) | [`props/tandem.js`](../eidoverse/props/tandem.js) | [`models/tandem_1896/`](../eidoverse/assets/models/tandem_1896/README.md) |
 | An M4A1-pattern carbine: a 499 k-triangle high, a 21 k low on GPU bakes, one layered material | `eidoblend.props.carbine` | [the carbine](#the-carbine) | none (native) | built in code; its look fetches 6 CC0 sets |
@@ -2350,6 +2355,106 @@ past the town's haze box an aerial perspective by distance (`AIR`). Put the
 collection at the town's origin, unrotated, and give the camera a clip end of
 33 km or more.
 
+## The WAKE ANOTHER ONE hall
+
+The set of the WAKE ANOTHER ONE music video, made in this edition (no WebGPU
+original) and registered as `wake_another_one.hall`: an automated factory
+hall 79 × 248 m and 13 m high. A hero line runs down a canyon of racks toward
+the dock door: a flush roller track with ten two-part cartons on it (units
+0–9: a tray each with its hood on), a stack for the hoods, a lectern with a
+printer and the crane's hanging control, and an overhead crane (runway,
+bridge, trolley, and a ring with four gripper pads) that lifts the hoods off
+one unit after another and stacks them. Behind the racks, the open floor holds
+more lines, each with its own crane. A main track carries a stream of closed
+cartons out through the dock door. A mechanical counter shows a number on four
+drums in a sheet-steel cabinet. There is also a returns cage and a frosted
+office window high on the side wall. The dock door opens onto a yard with
+parked trailers, a fence and SeedThree trees, under a low afternoon sun whose
+warm patch ends on the last unit's tray.
+
+```python
+from eidoblend.sets.wake_another_one import hall
+H = hall.build()                                    # the whole hall with its look and probe bake: 72 s, a 10 GB peak
+H = hall.build(small=True)                          # two rows of two lanes, the hall cut short at y -45 (the test's: 45 s)
+H = hall.build(look=False)                          # the layout alone, in flat colours, in under a second (small)
+H = hall.build(sky='hdri', trees=False, bake=False) # the photo sky, no trees, the probes left unbaked
+hall.animate({'run': [(1, 0.0), (240, 3.0)],        # the crane opens units 0, 1 and 2 over ten seconds
+              'meter': [(1, 3861), (96, 0)],        # the counter rolls down to 0000
+              'travel': [(1, 0.0), (480, 26.2)]})   # the stream rolls out through the dock
+H.bake_sky('cam_dock', 1, 480)                      # the sky family's sky, for each camera you render
+```
+
+- **The carton** (`carton.py`): a plain carton in two parts. The tray has its
+  walls up to the seam, a collar inside that stands up past the seam to the
+  rim, and a moulded insert whose pocket goes down to `body_mark`, where a body
+  stands or kneels. The hood comes down over the collar to the seam. A unit's
+  empty `line_NN_unit_K` is its tray's frame, and the hero line's
+  `line_00_mark_K` marks where a body stands in it. The crowd tools put a
+  crowd of bodies into the lines' trays ([characters](characters.md#crowds-and-columns--crowd)).
+- **The machines** are custom properties on control empties. Simple-expression
+  drivers turn them into motion: they evaluate without Python, in the saved
+  file, with no handler. `hall.CONTROLS` names each one, and `hall.animate`
+  keys them:
+
+  | Control | On | What it drives |
+  | --- | --- | --- |
+  | `run` | `gantry_ctl` | The hero crane. The whole part is the unit it works on (0–9; 10 is the fresh carton at unit 0). The fraction is the move: travel, lower, grip, raise, carry to the stack, set down. |
+  | `along_offset`, `hoist_offset` | `gantry_ctl` | Metres added to the bridge's place and to the ring's height. |
+  | `travel` | `track_ctl` | Metres the main track's stream has rolled toward the dock. |
+  | `swap` | `track_ctl` | 0–1: unit 0's open tray rolls out along the spur while a fresh closed carton rolls in. |
+  | `crowd_run` | `crowd_ctl` | Every other line's crane, as `run` for units 1–9. Each row runs a little after the one before. |
+  | `press` | `gantry_pendant` | The pendant's button, 0 out, 1 in. |
+  | `meter` | `meter_cabinet_ctl` | The number the counter shows (0–9999). It rolls like an odometer. |
+  | `feed` | `printer_ctl` | One sheet out of the printer onto its tray. `sheet_path` carries a sheet you parent to it. |
+  | `haze` | `look_ctl` | 1 renders the hall's air, 0 does not (a close shot saves 2.5–3.5 s a frame). |
+
+- **The look** (`look.py`; `look=False` leaves the flat-colour layout):
+  - **Materials.** Every layout material is rebuilt in place as a layered
+    material over CC0 scans fetched by ID on first use (ambientCG
+    Concrete034, Metal049A, Metal027, Metal009, Plastic010, Rubber004,
+    Paper001, Asphalt012). The floor is polished concrete with saw-cut
+    joints, traffic lanes, tyre arcs and grime under the racks. Each paint
+    wears to primer and steel at its arrises.
+  - **Geometry.** The hall's own geometry kit, kept private to this set
+    (`_kit`: bevels, a wear band, baked cavity, UVs in metres), details
+    the meshes. The racks get punched uprights on bolted footplates and
+    step beams with steel decks. The rollers are turned, on hexagon axles.
+    The walls are a precast dado, profiled liner and portal frames. The
+    dock door is a roller shutter on its coil. The services are a cable
+    tray and conduits, with Poly Haven fittings (a power box, a call point,
+    two cameras). The crane and the cabinet are rebuilt in their own frames,
+    so every driver still holds. For a new prop, the edition's hard-surface
+    kit is the way ([blender](blender.md#high-to-low-baked-on-the-gpu)).
+  - **Light.** The strip rows are continuous lines of area lights, and no
+    strip lamp casts a shadow. Over the hero aisle their diffuse light is
+    baked into a fine volume probe from emitting ribbons, and the lamps give
+    highlights only. The dock sun keeps its shadow. Five mirror probes cover
+    the hall. A thin haze switches with `haze`.
+  - **Outdoors.** After the probe bake comes the outdoors: by default the
+    sky family's Earth sky (`sky='sky'`, `make_sky`), its hour and azimuth
+    solved so its sun stands on the dock sun. The named photo option is
+    `sky='hdri'` (Poly Haven's syferfontein_18d_clear_puresky, CC0). Either
+    is seen whole through the door and lights at `sky_fill` (0.06): at full
+    strength a sky leaks into the hall. `trees=False` leaves the SeedThree
+    trees out of the yard.
+- **The sky and the probe bake.** A volume probe bake leaves the GPU's depth
+  test on, and the sky family's offscreen bake does not set its own, so after
+  one the sky would bake black. `Hall.bake_sky` resets the draw state first:
+  bake the sky through it.
+- **Its options** are `look.Look`'s: `strip`, `ribbon`, `far_lamp`, `bounce`,
+  `sun`, `sky_gain`, `sky_clamp`, `sky_fill`, `haze`, `drum_lamp`,
+  `exposure`, `samples`. Pass them to `hall.build`. Every dimension is in
+  `hall/layout.json`: change a number there and rebuild.
+- **What a frame costs** (measured at 960 × 540, 16 samples, motion blur
+  off): 4.5 s from `cam_dock` and 10.2 s from `cam_everywhere` in the whole
+  hall; 4.8 s from `cam_aisle_out` and 2.7 s from `cam_station` in the small
+  one.
+- **The cameras** are `cam_aisle_in`, `cam_aisle_out`, `cam_station`,
+  `cam_dock`, `cam_line_long` (`_b`), `cam_line_top`, `cam_top_unit0` / `1`,
+  `cam_drums`, `cam_cabinet_window`, `cam_cabinet_lock`, `cam_cabinet_line`,
+  `cam_pendant`, `cam_office`, `cam_out_1` / `2`, `cam_everywhere`,
+  `cam_sun_tray` (`_b`), `cam_printer` and `cam_line_85`.
+
 ## The 1896 tandem
 
 `eidoblend.props.tandem` is `eidoverse/props/tandem.js`: an 1896-pattern
@@ -3008,6 +3113,34 @@ builds every species alone (closed, dressed, its measured size, standing on
 its floor, carried by its root) and the lab's three together (no leaf
 through another), then two stills.
 
+### The hall's tests
+
+```bash
+bash run_blender.sh blender/tests/sets_wake_another_one/test_hall.py     # the small hall with its look, two stills (~55 s)
+#   --layout-only: the layout and its machines alone (under a second); --no-render: no probe bake, no stills; --no-trees
+```
+
+The test builds the small hall with its look and checks:
+
+- the layout: its lines and units, its cameras and control empties, the
+  carton's measures;
+- the crane: `run` 0 → 1 lifts unit 0's hood off its tray and sets it in the
+  stack's first slot to the micrometre; at `run` 1.3 the bridge stands over
+  unit 1 with its ring down; `along_offset` moves the bridge;
+- the other machines: `swap` rolls unit 0's tray out to the main track;
+  `travel` rolls the stream metre for metre; the counter's drums show 1234;
+  `press` and `feed` move the button and the sheet;
+- the keys and the drivers: `animate` keys a control and the crane follows
+  it on the frame; no frame handler is installed; every driver is a simple
+  expression;
+- the look: no layout material is left a flat colour.
+
+Then come two stills, `out/hall_cam_aisle_out.png` (down the line to the
+dock, the yard beyond) and `out/hall_cam_station.png`. Set
+`EIDO_ASSET_CACHE` to a checkout that has the CC0 library and
+`SEEDTHREE_DIR` to a SeedThree checkout; without one the yard has no trees,
+and the test says so.
+
 ## Not yet ported
 
 Every set's and prop's public API is ported. What differs from the WebGPU
@@ -3126,6 +3259,15 @@ pieces, and what was left out:
   the scrub is built low-poly lobes, right as dots from 300 m, lumpy closer;
   the tracks are pale bands without ruts, and leave the town's own tracks
   across a gap of 20-30 m.
+- **The WAKE ANOTHER ONE hall has no WebGPU original.** What its film had and
+  the set does not: the labeller, a robot arm that pressed a slip onto each
+  passing carton (the robotics kit's arm on a plinth, keyed by a `press`
+  control), and the cartons' slips. The cartons are plain. Its geometry kit
+  stays private to the set (vertex masks on the high mesh), where the edition's
+  hard-surface props bake their masks to a low ([blender](blender.md#high-to-low-baked-on-the-gpu)).
+  The counter's digits are flat glyphs on its drums. The far lines' moving
+  copies share six phases, so a wide shot shows the same crane move every sixth
+  row.
 - **Left out on purpose: the videos.** The music videos' conductors, cuts,
   song-timed cues and lyric timing, their look keys and their performers'
   outfits and staging recreate those videos, so they are not part of the kit:
