@@ -29,6 +29,9 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/assets/animations/performance_src/](../eidoverse/assets/animations/performance_src/README.md) | Asset source: Blender VRMA authoring script + engine-free clip checker | [blender](../tools-guides/blender.md) |
 | [eidoverse/assets/animations/performance_uf_src/](../eidoverse/assets/animations/performance_uf_src/README.md) | Asset source: Blender VRMA authoring script, mesh-aware clip checker and rig data (UNKNOWN FORCE clips) | [blender](../tools-guides/blender.md) |
 | [eidoverse/assets/grass/daisy_src/](../eidoverse/assets/grass/daisy_src/README.md) | Asset source: Blender + Python scripts that build the daisy sheet | [vegetation](../tools-guides/vegetation.md) |
+| [eidoverse/assets/models/carbine_src/](../eidoverse/assets/models/carbine_src/README.md) | Asset source: the Blender edition's made carbine exported as a GLB with its bake's maps and the look's tables (`export_glb.py`), the maps re-stored losslessly (`compress_maps.py`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/assets/models/helicopter_src/](../eidoverse/assets/models/helicopter_src/README.md) | Asset source: the Blender edition's made helicopter exported with its vertex masks (`export_glb.py`); `pack_glb.mjs` (Deno, glTF-Transform + meshoptimizer) packs a raw GLB with `EXT_meshopt_compression` | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/assets/models/houseplants_src/](../eidoverse/assets/models/houseplants_src/README.md) | Asset source: the Blender edition's houseplants grown one by one and exported with their leaf data (`export_glb.py`) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/assets/models/tandem_1896_src/](../eidoverse/assets/models/tandem_1896_src/README.md) | Asset source: Blender scripts that built the tandem GLB | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/assets/models/voice_machines_src/](../eidoverse/assets/models/voice_machines_src/README.md) | Asset source: Blender scripts that built the voice-machine GLBs | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/assets/sets/corner_src/](../eidoverse/assets/sets/corner_src/README.md) | Asset source: Blender/PIL scripts that built the corner set | [props-and-sets](../tools-guides/props-and-sets.md) |
@@ -89,12 +92,16 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/effects_tsl/vhs_tape.js](../eidoverse/effects_tsl/vhs_tape.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/effects_tsl/wavy.js](../eidoverse/effects_tsl/wavy.js) | Injected effect implementation/registry | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/basic_vrm.js](../eidoverse/examples/basic_vrm.js) | Scene example/template | [development](../tools-guides/development.md) |
+| [eidoverse/examples/carbine/scene.js](../eidoverse/examples/carbine/scene.js) | Scene example: the carbine in the studio light, three views and a turn | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/examples/daisy/analyze.py](../eidoverse/examples/daisy/analyze.py) | Example CLI: section-by-section mix measurement | [synthkit](../tools-guides/synthkit.md) |
 | [eidoverse/examples/daisy/captions.py](../eidoverse/examples/daisy/captions.py) | Example CLI: timeline to ASS subtitles, lyric preview | [voicebox](../tools-guides/voicebox.md) |
 | [eidoverse/examples/daisy/song.py](../eidoverse/examples/daisy/song.py) | Worked example: a complete song with voicebox + synthkit | [voicebox](../tools-guides/voicebox.md) |
 | [eidoverse/examples/finishing/song.py](../eidoverse/examples/finishing/song.py) | Worked example: a sung phrase made from scratch and its mouth from the vocal stem | [audio](../tools-guides/audio.md) |
 | [eidoverse/examples/finishing/scene.js](../eidoverse/examples/finishing/scene.js) | Worked example: the sona sings on a stage, its mouth from the stem | [audio](../tools-guides/audio.md) |
 | [eidoverse/examples/finishing/finish.py](../eidoverse/examples/finishing/finish.py) | Example CLI: a rendered film through the finishing chain (merge, clock, print, line sheet) | [postprocessing](../tools-guides/postprocessing.md) |
+| [eidoverse/examples/helicopter/flight.js](../eidoverse/examples/helicopter/flight.js) | Scene example: the helicopter flying low over a plain under the engine's sky, its rotors turning | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/examples/helicopter/studio.js](../eidoverse/examples/helicopter/studio.js) | Scene example: the helicopter on its wheels in the studio light, rotors idling | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/examples/houseplants/scene.js](../eidoverse/examples/houseplants/scene.js) | Scene example: the five houseplants in the studio light | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/examples/motion_vectors/scene.js](../eidoverse/examples/motion_vectors/scene.js) | Scene example: the runner's motion output (`"motionVectors"`), checked by `check.py` (files, convention, an unchanged picture) | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/obstacle_course.js](../eidoverse/examples/obstacle_course.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/assembly.scene.js](../eidoverse/examples/robotics/assembly.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
@@ -121,6 +128,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/graphics/preview_screens.mjs](../eidoverse/graphics/preview_screens.mjs) | CLI utility: engine-free PNGs, contact sheets, draw cost | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [eidoverse/graphics/screens_nan_sweep.mjs](../eidoverse/graphics/screens_nan_sweep.mjs) | CLI crash guard: non-finite canvas-geometry sweep | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [eidoverse/iso_field.js](../eidoverse/iso_field.js) | Injected scene API | [sdf-volumes](../tools-guides/sdf-volumes.md) |
+| [eidoverse/layered_material.js](../eidoverse/layered_material.js) | Dynamic ESM: the layered material on a baked asset's maps in TSL (`bakedMaterial`, `loadBake`, `photos`) and the node layer it is written in (`kit`: Blender's noise, box projection, Cubic pictures, bump) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/loft.js](../eidoverse/loft.js) | Injected scene API | [geometry](../tools-guides/geometry.md) |
 | [eidoverse/lyric_renderer.py](../eidoverse/lyric_renderer.py) | Optional Python frame utility; no CLI | [motion-graphics](../tools-guides/motion-graphics.md) |
 | [eidoverse/model_kit.js](../eidoverse/model_kit.js) | Injected scene API | [assets](../tools-guides/assets.md) |
@@ -132,6 +140,9 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/particle_morph.js](../eidoverse/particle_morph.js) | Injected scene API | [particles-fx](../tools-guides/particles-fx.md) |
 | [eidoverse/particles.js](../eidoverse/particles.js) | Injected scene API | [particles-fx](../tools-guides/particles-fx.md) |
 | [eidoverse/procedural_materials.js](../eidoverse/procedural_materials.js) | Injected scene API | [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
+| [eidoverse/props/carbine.js](../eidoverse/props/carbine.js) | Dynamic ESM prop: the SAME SEED carbine on its GPU bakes, its layered material in TSL | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/props/helicopter.js](../eidoverse/props/helicopter.js) | Dynamic ESM prop: the SAME SEED helicopter as its high, its vertex-mask layer stack in TSL, its rotors turning | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/props/houseplants.js](../eidoverse/props/houseplants.js) | Dynamic ESM prop: the SAME SEED houseplants and watering can, their leaf and pot materials in TSL | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/props/tandem.js](../eidoverse/props/tandem.js) | Dynamic ESM prop: tandem, rider IK, teapot stoker | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/props/voice_machines/index.js](../eidoverse/props/voice_machines/index.js) | Dynamic ESM: voice-machine catalogue, buildMachine/loadMachine | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/props/voice_machines/c64.js](../eidoverse/props/voice_machines/c64.js) | Dynamic ESM prop (1982 C64 + monitor) | [props-and-sets](../tools-guides/props-and-sets.md) |

@@ -94,7 +94,7 @@ a guide is added or renamed. `CLAUDE.md` imports this same main instruction.
 | [Scene format and renderer](tools-guides/scene-format.md) | Creating scene JSON/JS, loading assets, renderer setup and engine globals. |
 | [Asset sourcing and model kits](tools-guides/assets.md) | Finding models, HDRIs and PBR maps; loading GLBs and reusable kit parts. |
 | [Blender asset authoring](tools-guides/blender.md) | Headless Blender runs, garments and accessories for VRMs, VRMA animation clips, hard-surface props baked to GLB and trim sheets. |
-| [Props and sets](tools-guides/props-and-sets.md) | Historical voice machines (1939–2001), an 1896 tandem with rider IK, the DAISY film's corner, funeral and ocean sets, and the UNKNOWN FORCE film's night city, interiors, corridor, data centre, race and paper-canyon sets. |
+| [Props and sets](tools-guides/props-and-sets.md) | Historical voice machines (1939–2001), an 1896 tandem with rider IK, the DAISY film's corner, funeral and ocean sets, the UNKNOWN FORCE film's night city, interiors, corridor, data centre, race and paper-canyon sets, and the SAME SEED film's carbine (a layered material on its GPU bakes, in TSL), helicopter (its 2.7 M-triangle high, rotors turning) and houseplants. |
 | [Audio and speech](tools-guides/audio.md) | Music, SFX, narration, voice processing, lyric timing, lipsync (a singing mouth from a vocal stem too), a song's clock and mixing. |
 | [Voice synthesis](tools-guides/voicebox.md) | Singing or speaking voices made from scratch, historical machine-voice eras (1939 Voder → neural), choirs, phoneme-exact visemes. |
 | [Music synthesis](tools-guides/synthkit.md) | Hand-built instruments and drums, sequencing, sidechain, designed FX, loudness-targeted mastering. |

@@ -1,0 +1,9 @@
+{
+    "width": 1280,
+    "height": 720,
+    "fps": 24,
+    "duration": 12.0,
+    "script": "eidoverse/examples/houseplants/scene.js",
+    "outputVideo": "work/example_houseplants.mp4",
+    "skipPreflightQA": true
+}

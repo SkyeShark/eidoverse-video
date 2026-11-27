@@ -1,0 +1,9 @@
+{
+    "width": 1280,
+    "height": 720,
+    "fps": 24,
+    "duration": 12.0,
+    "script": "eidoverse/examples/helicopter/flight.js",
+    "outputVideo": "work/example_helicopter_flight.mp4",
+    "skipPreflightQA": true
+}

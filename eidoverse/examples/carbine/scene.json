@@ -1,0 +1,9 @@
+{
+    "width": 1280,
+    "height": 720,
+    "fps": 24,
+    "duration": 14.0,
+    "script": "eidoverse/examples/carbine/scene.js",
+    "outputVideo": "work/example_carbine.mp4",
+    "skipPreflightQA": true
+}
