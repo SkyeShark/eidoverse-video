@@ -1,0 +1,12 @@
+{
+    "width": 960, "height": 540, "fps": 24, "duration": 4.0,
+    "script": "eidoverse/examples/crowd/scene.js",
+    "outputVideo": "work/crowd_example/crowd.mp4",
+    "skipPreflightQA": true,
+    "assets": {
+        "character_vrm": "eidoverse/assets/vrms/claude_robot.vrm",
+        "joints": "eidoverse/assets/vrms/claude_robot.joints.json",
+        "walk": "eidoverse/assets/animations/walk.vrma",
+        "wave": "eidoverse/assets/animations/wave_goodbye.vrma"
+    }
+}

@@ -254,7 +254,10 @@ export async function setupRenderer(width, height) {
             // reliable discriminator is depthOrArrayLayers: morph/skinning buffers
             // are DataArrayTextures (one layer per morph target); every genuine
             // render target in this pipeline is single-layer.
-            if (h === 1 || arr > 1) {
+            // eidoverse/data/* labels declare sampled Float32 resources (the crowd's
+            // vertex-animation textures), never render targets. Preserve their
+            // bytes and precision; f16 reinterpretation corrupts them.
+            if (h === 1 || arr > 1 || desc.label?.startsWith('eidoverse/data/')) {
                 _stripRACount++;
                 if (_stripRACount <= 3) {
                     console.log(`[render_common] stripping RENDER_ATTACHMENT from morph-like rgba32float texture (${w}x${h}x${arr})`);

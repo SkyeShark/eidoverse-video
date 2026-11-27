@@ -1,0 +1,6 @@
+{
+    "width": 960, "height": 540, "fps": 1, "duration": 11,
+    "script": "eidoverse/examples/town/scene.js",
+    "outputVideo": "work/town_example/town.mp4",
+    "skipPreflightQA": true
+}

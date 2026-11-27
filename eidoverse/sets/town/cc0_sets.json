@@ -1,0 +1,32 @@
+{
+ "about": "The town's CC0 PBR sets (AmbientCG and Poly Haven), fetched by ID into the shared library on first use (fetchPBR). tile: the set's real size in metres (width, height); relief: its displacement map's full range in metres; mean: the mean linear colour of its colour map and contrast its luminance's relative spread, as the Blender edition measured them (blender/tools/measure_cc0_sets.py on the blender branch); what: what the town uses it for.",
+ "sets": {
+  "render_sand": {"id": "Concrete048", "res": "1k", "tile": [1.8, 1.8], "relief": 0.002, "mean": [0.36234, 0.31433, 0.24288], "contrast": 0.079, "what": "cement render, brushed, sand: the main plaster grain"},
+  "plaster_worn": {"id": "PaintedPlaster015", "res": "2k", "tile": [2.2, 2.2], "relief": 0.002, "mean": [0.32767, 0.32618, 0.30202], "contrast": 0.131, "what": "painted plaster with its paint gone in flakes: weathering patches"},
+  "plaster_fine": {"id": "PaintedPlaster017", "res": "2k", "tile": [2.0, 2.0], "relief": 0.0015, "mean": [0.51452, 0.51913, 0.49568], "contrast": 0.031, "what": "smooth painted plaster with hairline cracks: interiors, ceilings"},
+  "stucco": {"id": "white_stucco_02", "res": "2k", "tile": [1.2, 1.2], "relief": 0.002, "mean": [0.4246, 0.41944, 0.40092], "contrast": 0.078, "what": "rough stucco: a third of the buildings, the mosque"},
+  "block": {"id": "concrete_block_wall", "res": "2k", "tile": [1.3, 1.3], "relief": 0.008, "mean": [0.06135, 0.04875, 0.03349], "contrast": 0.339, "what": "hollow concrete block in running bond: bare walls, spalled plaster"},
+  "brick": {"id": "Bricks105", "res": "2k", "tile": [2.4, 1.2], "relief": 0.006, "mean": [0.48763, 0.29931, 0.14928], "contrast": 0.184, "what": "buff brick"},
+  "concrete": {"id": "Concrete044D", "res": "2k", "tile": [2.0, 2.0], "relief": 0.002, "mean": [0.13288, 0.11901, 0.10323], "contrast": 0.208, "what": "cast concrete with its blowholes: the frame, slab edges, sills"},
+  "concrete_smooth": {"id": "Concrete034", "res": "2k", "tile": [2.0, 2.0], "relief": 0.0015, "mean": [0.48167, 0.48167, 0.48167], "contrast": 0.06, "what": "trowelled concrete: roof screed, kerbs"},
+  "asphalt": {"id": "Asphalt025C", "res": "2k", "tile": [2.5, 2.5], "relief": 0.004, "mean": [0.02496, 0.02457, 0.02194], "contrast": 0.254, "what": "asphalt"},
+  "pavers": {"id": "PavingStones128", "res": "1k", "tile": [1.5, 1.5], "relief": 0.004, "mean": [0.36028, 0.33606, 0.27715], "contrast": 0.297, "what": "concrete pavers: pavements, the mosque square"},
+  "terrazzo": {"id": "Terrazzo005", "res": "1k", "tile": [1.2, 1.2], "relief": 0.0, "mean": [0.59668, 0.56217, 0.53395], "contrast": 0.46, "what": "terrazzo tiles: the floors of the rooms that stand open"},
+  "sand": {"id": "coast_sand_01", "res": "2k", "tile": [2.5, 2.5], "relief": 0.01, "mean": [0.22504, 0.17206, 0.10822], "contrast": 0.227, "what": "sand with grit: the plain"},
+  "dry_ground": {"id": "dry_ground_01", "res": "2k", "tile": [2.2, 2.2], "relief": 0.01, "mean": [0.2372, 0.19837, 0.14634], "contrast": 0.275, "what": "dry cracked ground: yards, the plain in patches"},
+  "gravel_ground": {"id": "rock_ground_02", "res": "2k", "tile": [2.0, 2.0], "relief": 0.02, "mean": [0.18599, 0.16027, 0.11604], "contrast": 0.501, "what": "gravelly ground: tracks, rubble fines, the plain in patches"},
+  "dirt": {"id": "Ground106", "res": "2k", "tile": [2.0, 2.0], "relief": 0.01, "mean": [0.19071, 0.12799, 0.06767], "contrast": 0.414, "what": "brown earth with pebbles: medians, beds, yards"},
+  "dry_grass": {"id": "withered_grass", "res": "2k", "tile": [2.0, 2.0], "relief": 0.01, "mean": [0.4211, 0.29999, 0.19772], "contrast": 0.252, "what": "sand with dry grass: the plain at its scrub"},
+  "mud_cracked": {"id": "mud_cracked_dry_03", "res": "2k", "tile": [2.5, 2.5], "relief": 0.01, "mean": [0.63212, 0.40139, 0.22381], "contrast": 0.191, "what": "cracked dry mud: low ground, dry fields"},
+  "burnt": {"id": "burned_ground_01", "res": "2k", "tile": [2.0, 2.0], "relief": 0.01, "mean": [0.1443, 0.10634, 0.07574], "contrast": 0.808, "what": "burnt ground: craters"},
+  "grass": {"id": "Grass004", "res": "2k", "tile": [2.0, 2.0], "relief": 0.01, "mean": [0.12487, 0.1592, 0.03344], "contrast": 0.388, "what": "green crop ground: the fields"},
+  "gravel": {"id": "Gravel041", "res": "2k", "tile": [1.5, 1.5], "relief": 0.015, "mean": [0.28077, 0.27056, 0.19114], "contrast": 0.403, "what": "pale gravel: rubble fines"},
+  "shutter": {"id": "painted_metal_shutter", "res": "2k", "tile": [1.8, 1.8], "relief": 0.004, "mean": [0.21682, 0.2304, 0.24134], "contrast": 0.2, "what": "a roller shutter, its slats 77 mm"},
+  "corrugated": {"id": "CorrugatedSteel009", "res": "2k", "tile": [2.28, 1.14], "relief": 0.012, "mean": [0.22968, 0.22787, 0.2279], "contrast": 0.304, "what": "corrugated galvanised sheet, 76 mm pitch"},
+  "rust": {"id": "rust_coarse_01", "res": "2k", "tile": [1.0, 1.0], "relief": 0.002, "mean": [0.12848, 0.04317, 0.01488], "contrast": 0.388, "what": "coarse rust"},
+  "metal": {"id": "Metal063", "res": "2k", "tile": [1.0, 1.0], "relief": 0.0005, "mean": [0.1578, 0.15483, 0.14664], "contrast": 0.09, "what": "steel sheet with spots: the grain under paint"},
+  "fabric": {"id": "Fabric062", "res": "2k", "tile": [0.5, 0.5], "relief": 0.0005, "mean": [0.56564, 0.53358, 0.48653], "contrast": 0.255, "what": "woven canvas: awnings, tarps, washing, sacks"},
+  "cardboard": {"id": "Cardboard002", "res": "1k", "tile": [0.8, 0.8], "relief": 0.0005, "mean": [0.49297, 0.277, 0.07378], "contrast": 0.047, "what": "cardboard"},
+  "wood": {"id": "Wood066", "res": "1k", "tile": [1.0, 1.0], "relief": 0.001, "mean": [0.10514, 0.03558, 0.00699], "contrast": 0.382, "what": "wood"}
+ }
+}

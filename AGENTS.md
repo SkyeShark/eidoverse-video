@@ -4225,7 +4225,8 @@ the canonical path (same family as `makeScreen` for drawn content).
   VRMA animation clips, hard-surface props baked to GLB, trim sheets rendered from models.
 - [docs/props-and-sets.md](docs/props-and-sets.md) — eight historical voice machines (1939–2001), an 1896
   tandem with rider IK, the DAISY film's corner, funeral and ocean sets, and the SAME SEED film's carbine,
-  helicopter, houseplants and four rooms made in Blender (below).
+  helicopter, houseplants and four rooms made in Blender (below). A town on a street grid and
+  crowds of any VRM: "A town" and "Crowds and columns" below.
 - [docs/voicebox.md](docs/voicebox.md) — singing and speaking voices made from scratch, historical
   machine-voice eras, choirs, phoneme-exact visemes.
 - [docs/synthkit.md](docs/synthkit.md) — hand-built instruments and drums, sequencing, designed FX,
@@ -4284,6 +4285,67 @@ shared library (about 650 MB for all four). Each room's cameras, marks, light,
 how its Blender materials are rebuilt in TSL and where it differs from the
 Blender stills: [docs/props-and-sets.md](docs/props-and-sets.md#the-same-seed-rooms).
 `eidoverse/examples/same_seed_rooms/` renders each through its wide camera.
+
+### A town — `eidoverse/sets/town/`
+
+A concrete-frame town on a street grid: houses of one to five floors with
+shops, a main road, side streets, a mosque, cars, palms, an edge thinning
+into the plain. It is the Blender edition's town, building for building.
+Intact by default.
+
+```js
+const TOWN = await import(new URL('sets/town/index.js', EIDOVERSE_DIR).href);
+const town = await TOWN.build(THREE);                    // 840 x 300 m, seed 7, about 8 s
+scene.add(town.group);
+const W = await TOWN.world(THREE, { scene, camera, renderer, root: town.group });   // sun, sky, dust
+const [name, pos, target, lens] = town.views()[4];       // the Blender edition's lenses
+TOWN.aim(THREE, camera, town.group, pos, target, lens);
+W.update(t);                                             // every frame
+```
+
+- Options: `seed`, `extent`, `edge`, `things: false` (no CC0 models),
+  `clay: true`, `res`. `damage: true` strikes the places the seed picks.
+- Signs take your text: `signs: [text, 'a_picture.png']`, painted on a
+  canvas. No sign text ships; without `signs` the boards stay blank.
+- The look is TSL over CC0 sets fetched by ID (`sets/town/cc0_sets.json`).
+  Every unique mesh is one `InstancedMesh`.
+- Cost at 960 × 540: first frame about 40 s (pipelines compile), then 6 to
+  16 s a frame.
+- Example: `python eido.py render eidoverse/examples/town/scene.json`
+  (eleven lenses, one a second; `TOWN_EXTENT=260x160`, `TOWN_DAMAGE=1`,
+  `TOWN_CLAY=1`). Test: `deno test -A eidoverse/sets/town/town_test.mjs`.
+
+### Crowds and columns — `eidoverse/crowd.js`
+
+Crowds and marching columns of any VRM. One donor body is posed once per
+pose and baked into a vertex-animation texture; every body is that donor
+drawn instanced, its pose and place computed in the vertex shader from the
+frame number. Same clocks as the Blender edition.
+
+```js
+const CROWD = await import(new URL('crowd.js', EIDOVERSE_DIR).href);
+const lamp = CROWD.heldProp(THREE, lanternGroup, { bone: 'rightHand', grip: 'fist', hang: true });
+const cyc = await CROWD.strideCycle(THREE, vrm, walkClip, { fps: 24, bpm: 116, props: [lamp], curl: { right: 80 } });
+const pts = CROWD.formation({ files: 3, ranks: 6, interval: 0.85, distance: 1.05, heading: 90 });
+const column = CROWD.crowd(THREE, 'column', pts, CROWD.columnGroup(cyc, { refFrame: 1 }));
+scene.add(column.group);
+column.update(frame);                                    // every frame: the film's frame number, from 1
+```
+
+- `strideCycle` bakes one stride of an in-place walk with its feet planted
+  (two-bone IK) and a swinging foot clear of the floor. `onceFlipbook` +
+  `onceGroup` play a one-shot clip in canon (`canonStarts`), with a `hold`
+  and each point's `stops`.
+- `perPose(vrm, dt)` runs on every baked pose: put the robot body's
+  `claude_robot_dof.js` chain there, as the example does.
+- Props: any Object3D in either hand; `hang: true` keeps it plumb.
+- Example: `python eido.py render eidoverse/examples/crowd/scene.json` (the
+  robot body marching with lanterns, a canon of waves;
+  `CROWD_VIEW=close|canon|canon_close`). Test:
+  `deno test -A eidoverse/crowd_test.mjs`.
+- Limits: level ground, straight lines; transparent layers are not sorted
+  body by body. Keep a float data texture's `eidoverse/data/` name: the
+  renderer halves any other `rgba32float` texture.
 
 ### The shared library — library code names IDs, never commits them
 
