@@ -1,0 +1,1461 @@
+{
+ "about": "The desert round the town, as the Blender edition makes it (eidoblend.sets.desert), exported by desert_src/export_desert.py: the land in three rings of tiles, the scrub, the marks finer than the mesh, and the lenses. Metres of the town, +Z up.",
+ "land": {
+  "rings": {
+   "A": {
+    "file": "desert_A.glb",
+    "reach": 2048.0,
+    "tile": 1024.0,
+    "tiles": 16,
+    "vertices": 551536,
+    "triangles": 1094016
+   },
+   "B": {
+    "file": "desert_B.glb",
+    "reach": 8192.0,
+    "tile": 4096.0,
+    "tiles": 16,
+    "vertices": 1786160,
+    "triangles": 3559744
+   },
+   "C": {
+    "file": "desert_C.glb",
+    "reach": 32768.0,
+    "tile": 16384.0,
+    "tiles": 16,
+    "vertices": 167856,
+    "triangles": 329984
+   }
+  },
+  "tiles": [
+   {
+    "name": "desert_A_00",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -2048.0,
+     -2048.0,
+     1024.0
+    ],
+    "vertices": 43937,
+    "triangles": 87328,
+    "min": [
+     -2048.0,
+     -2048.0,
+     3.938
+    ],
+    "max": [
+     -1024.0,
+     -1024.0,
+     48.18
+    ]
+   },
+   {
+    "name": "desert_A_01",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -1024.0,
+     -2048.0,
+     1024.0
+    ],
+    "vertices": 31809,
+    "triangles": 63104,
+    "min": [
+     -1024.0,
+     -2048.0,
+     3.222
+    ],
+    "max": [
+     0.0,
+     -1024.0,
+     65.723
+    ]
+   },
+   {
+    "name": "desert_A_02",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     0.0,
+     -2048.0,
+     1024.0
+    ],
+    "vertices": 22593,
+    "triangles": 44704,
+    "min": [
+     0.0,
+     -2048.0,
+     4.651
+    ],
+    "max": [
+     1024.0,
+     -1024.0,
+     68.472
+    ]
+   },
+   {
+    "name": "desert_A_03",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     1024.0,
+     -2048.0,
+     1024.0
+    ],
+    "vertices": 50049,
+    "triangles": 99552,
+    "min": [
+     1024.0,
+     -2048.0,
+     5.889
+    ],
+    "max": [
+     2048.0,
+     -1024.0,
+     61.353
+    ]
+   },
+   {
+    "name": "desert_A_10",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -2048.0,
+     -1024.0,
+     1024.0
+    ],
+    "vertices": 16513,
+    "triangles": 32576,
+    "min": [
+     -2048.0,
+     -1024.0,
+     3.584
+    ],
+    "max": [
+     -1024.0,
+     0.0,
+     9.868
+    ]
+   },
+   {
+    "name": "desert_A_11",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -1024.0,
+     -1024.0,
+     1024.0
+    ],
+    "vertices": 81121,
+    "triangles": 161184,
+    "min": [
+     -1024.0,
+     -1024.0,
+     -0.539
+    ],
+    "max": [
+     0.0,
+     0.0,
+     5.421
+    ]
+   },
+   {
+    "name": "desert_A_12",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     0.0,
+     -1024.0,
+     1024.0
+    ],
+    "vertices": 78049,
+    "triangles": 155072,
+    "min": [
+     0.0,
+     -1024.0,
+     -0.537
+    ],
+    "max": [
+     1024.0,
+     0.0,
+     6.13
+    ]
+   },
+   {
+    "name": "desert_A_13",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     1024.0,
+     -1024.0,
+     1024.0
+    ],
+    "vertices": 13473,
+    "triangles": 26528,
+    "min": [
+     1024.0,
+     -1024.0,
+     3.35
+    ],
+    "max": [
+     2048.0,
+     0.0,
+     12.929
+    ]
+   },
+   {
+    "name": "desert_A_20",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -2048.0,
+     0.0,
+     1024.0
+    ],
+    "vertices": 7265,
+    "triangles": 14240,
+    "min": [
+     -2048.0,
+     0.0,
+     4.089
+    ],
+    "max": [
+     -1024.0,
+     1024.0,
+     11.08
+    ]
+   },
+   {
+    "name": "desert_A_21",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -1024.0,
+     0.0,
+     1024.0
+    ],
+    "vertices": 77985,
+    "triangles": 155008,
+    "min": [
+     -1024.0,
+     0.0,
+     -0.539
+    ],
+    "max": [
+     0.0,
+     1024.0,
+     8.239
+    ]
+   },
+   {
+    "name": "desert_A_22",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     0.0,
+     0.0,
+     1024.0
+    ],
+    "vertices": 76993,
+    "triangles": 152960,
+    "min": [
+     0.0,
+     0.0,
+     -0.541
+    ],
+    "max": [
+     1024.0,
+     1024.0,
+     8.839
+    ]
+   },
+   {
+    "name": "desert_A_23",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     1024.0,
+     0.0,
+     1024.0
+    ],
+    "vertices": 7265,
+    "triangles": 14240,
+    "min": [
+     1024.0,
+     0.0,
+     3.858
+    ],
+    "max": [
+     2048.0,
+     1024.0,
+     13.914
+    ]
+   },
+   {
+    "name": "desert_A_30",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -2048.0,
+     1024.0,
+     1024.0
+    ],
+    "vertices": 7297,
+    "triangles": 14272,
+    "min": [
+     -2048.0,
+     1024.0,
+     7.836
+    ],
+    "max": [
+     -1024.0,
+     2048.0,
+     18.036
+    ]
+   },
+   {
+    "name": "desert_A_31",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     -1024.0,
+     1024.0,
+     1024.0
+    ],
+    "vertices": 7297,
+    "triangles": 14272,
+    "min": [
+     -1024.0,
+     1024.0,
+     6.426
+    ],
+    "max": [
+     0.0,
+     2048.0,
+     18.624
+    ]
+   },
+   {
+    "name": "desert_A_32",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     0.0,
+     1024.0,
+     1024.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     0.0,
+     1024.0,
+     7.106
+    ],
+    "max": [
+     1024.0,
+     2048.0,
+     19.153
+    ]
+   },
+   {
+    "name": "desert_A_33",
+    "ring": "A",
+    "file": "desert_A.glb",
+    "square": [
+     1024.0,
+     1024.0,
+     1024.0
+    ],
+    "vertices": 25665,
+    "triangles": 50784,
+    "min": [
+     1024.0,
+     1024.0,
+     8.392
+    ],
+    "max": [
+     2048.0,
+     2048.0,
+     68.775
+    ]
+   },
+   {
+    "name": "desert_B_00",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -8192.0,
+     -8192.0,
+     4096.0
+    ],
+    "vertices": 16481,
+    "triangles": 32544,
+    "min": [
+     -8192.0,
+     -8192.0,
+     20.496
+    ],
+    "max": [
+     -4096.0,
+     -4096.0,
+     51.703
+    ]
+   },
+   {
+    "name": "desert_B_01",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -4096.0,
+     -8192.0,
+     4096.0
+    ],
+    "vertices": 105441,
+    "triangles": 209888,
+    "min": [
+     -4096.0,
+     -8192.0,
+     16.68
+    ],
+    "max": [
+     0.0,
+     -4096.0,
+     185.408
+    ]
+   },
+   {
+    "name": "desert_B_02",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     0.0,
+     -8192.0,
+     4096.0
+    ],
+    "vertices": 68769,
+    "triangles": 136640,
+    "min": [
+     0.0,
+     -8192.0,
+     14.835
+    ],
+    "max": [
+     4096.0,
+     -4096.0,
+     133.044
+    ]
+   },
+   {
+    "name": "desert_B_03",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     4096.0,
+     -8192.0,
+     4096.0
+    ],
+    "vertices": 7233,
+    "triangles": 14208,
+    "min": [
+     4096.0,
+     -8192.0,
+     17.564
+    ],
+    "max": [
+     8192.0,
+     -4096.0,
+     26.208
+    ]
+   },
+   {
+    "name": "desert_B_10",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -8192.0,
+     -4096.0,
+     4096.0
+    ],
+    "vertices": 22593,
+    "triangles": 44736,
+    "min": [
+     -8192.0,
+     -4096.0,
+     12.029
+    ],
+    "max": [
+     -4096.0,
+     0.0,
+     352.096
+    ]
+   },
+   {
+    "name": "desert_B_11",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -4096.0,
+     -4096.0,
+     4096.0
+    ],
+    "vertices": 113921,
+    "triangles": 226624,
+    "min": [
+     -4096.0,
+     -4096.0,
+     7.233
+    ],
+    "max": [
+     0.0,
+     0.0,
+     114.683
+    ]
+   },
+   {
+    "name": "desert_B_12",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     0.0,
+     -4096.0,
+     4096.0
+    ],
+    "vertices": 123169,
+    "triangles": 244960,
+    "min": [
+     0.0,
+     -4096.0,
+     9.191
+    ],
+    "max": [
+     4096.0,
+     0.0,
+     143.187
+    ]
+   },
+   {
+    "name": "desert_B_13",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     4096.0,
+     -4096.0,
+     4096.0
+    ],
+    "vertices": 74369,
+    "triangles": 148160,
+    "min": [
+     4096.0,
+     -4096.0,
+     14.477
+    ],
+    "max": [
+     8192.0,
+     0.0,
+     296.069
+    ]
+   },
+   {
+    "name": "desert_B_20",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -8192.0,
+     0.0,
+     4096.0
+    ],
+    "vertices": 41025,
+    "triangles": 81312,
+    "min": [
+     -8192.0,
+     0.0,
+     13.403
+    ],
+    "max": [
+     -4096.0,
+     4096.0,
+     266.875
+    ]
+   },
+   {
+    "name": "desert_B_21",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -4096.0,
+     0.0,
+     4096.0
+    ],
+    "vertices": 412801,
+    "triangles": 824320,
+    "min": [
+     -4096.0,
+     0.0,
+     9.528
+    ],
+    "max": [
+     0.0,
+     4096.0,
+     269.119
+    ]
+   },
+   {
+    "name": "desert_B_22",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     0.0,
+     0.0,
+     4096.0
+    ],
+    "vertices": 293601,
+    "triangles": 585952,
+    "min": [
+     0.0,
+     0.0,
+     12.232
+    ],
+    "max": [
+     4096.0,
+     4096.0,
+     252.066
+    ]
+   },
+   {
+    "name": "desert_B_23",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     4096.0,
+     0.0,
+     4096.0
+    ],
+    "vertices": 25633,
+    "triangles": 50816,
+    "min": [
+     4096.0,
+     0.0,
+     17.327
+    ],
+    "max": [
+     8192.0,
+     4096.0,
+     383.541
+    ]
+   },
+   {
+    "name": "desert_B_30",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -8192.0,
+     4096.0,
+     4096.0
+    ],
+    "vertices": 233249,
+    "triangles": 465600,
+    "min": [
+     -8192.0,
+     4096.0,
+     28.139
+    ],
+    "max": [
+     -4096.0,
+     8192.0,
+     272.217
+    ]
+   },
+   {
+    "name": "desert_B_31",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     -4096.0,
+     4096.0,
+     4096.0
+    ],
+    "vertices": 221025,
+    "triangles": 441024,
+    "min": [
+     -4096.0,
+     4096.0,
+     26.852
+    ],
+    "max": [
+     0.0,
+     8192.0,
+     240.364
+    ]
+   },
+   {
+    "name": "desert_B_32",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     0.0,
+     4096.0,
+     4096.0
+    ],
+    "vertices": 22657,
+    "triangles": 44800,
+    "min": [
+     0.0,
+     4096.0,
+     26.111
+    ],
+    "max": [
+     4096.0,
+     8192.0,
+     239.675
+    ]
+   },
+   {
+    "name": "desert_B_33",
+    "ring": "B",
+    "file": "desert_B.glb",
+    "square": [
+     4096.0,
+     4096.0,
+     4096.0
+    ],
+    "vertices": 4193,
+    "triangles": 8160,
+    "min": [
+     4096.0,
+     4096.0,
+     27.646
+    ],
+    "max": [
+     8192.0,
+     8192.0,
+     36.187
+    ]
+   },
+   {
+    "name": "desert_C_00",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -32768.0,
+     -32768.0,
+     16384.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     -32768.0,
+     -32768.0,
+     -46.0
+    ],
+    "max": [
+     -16384.0,
+     -16384.0,
+     24.199
+    ]
+   },
+   {
+    "name": "desert_C_01",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -16384.0,
+     -32768.0,
+     16384.0
+    ],
+    "vertices": 7265,
+    "triangles": 14240,
+    "min": [
+     -16384.0,
+     -32768.0,
+     -6.342
+    ],
+    "max": [
+     0.0,
+     -16384.0,
+     182.412
+    ]
+   },
+   {
+    "name": "desert_C_02",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     0.0,
+     -32768.0,
+     16384.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     0.0,
+     -32768.0,
+     -5.073
+    ],
+    "max": [
+     16384.0,
+     -16384.0,
+     28.976
+    ]
+   },
+   {
+    "name": "desert_C_03",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     16384.0,
+     -32768.0,
+     16384.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     16384.0,
+     -32768.0,
+     -44.304
+    ],
+    "max": [
+     32768.0,
+     -16384.0,
+     21.341
+    ]
+   },
+   {
+    "name": "desert_C_10",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -32768.0,
+     -16384.0,
+     16384.0
+    ],
+    "vertices": 7265,
+    "triangles": 14240,
+    "min": [
+     -32768.0,
+     -16384.0,
+     -4.287
+    ],
+    "max": [
+     -16384.0,
+     0.0,
+     92.744
+    ]
+   },
+   {
+    "name": "desert_C_11",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -16384.0,
+     -16384.0,
+     16384.0
+    ],
+    "vertices": 30849,
+    "triangles": 61024,
+    "min": [
+     -16384.0,
+     -16384.0,
+     19.721
+    ],
+    "max": [
+     0.0,
+     0.0,
+     131.371
+    ]
+   },
+   {
+    "name": "desert_C_12",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     0.0,
+     -16384.0,
+     16384.0
+    ],
+    "vertices": 15489,
+    "triangles": 30464,
+    "min": [
+     0.0,
+     -16384.0,
+     18.829
+    ],
+    "max": [
+     16384.0,
+     0.0,
+     29.423
+    ]
+   },
+   {
+    "name": "desert_C_13",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     16384.0,
+     -16384.0,
+     16384.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     16384.0,
+     -16384.0,
+     -8.098
+    ],
+    "max": [
+     32768.0,
+     0.0,
+     29.46
+    ]
+   },
+   {
+    "name": "desert_C_20",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -32768.0,
+     0.0,
+     16384.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     -32768.0,
+     0.0,
+     3.266
+    ],
+    "max": [
+     -16384.0,
+     16384.0,
+     37.533
+    ]
+   },
+   {
+    "name": "desert_C_21",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -16384.0,
+     0.0,
+     16384.0
+    ],
+    "vertices": 24705,
+    "triangles": 48832,
+    "min": [
+     -16384.0,
+     0.0,
+     22.914
+    ],
+    "max": [
+     0.0,
+     16384.0,
+     38.525
+    ]
+   },
+   {
+    "name": "desert_C_22",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     0.0,
+     0.0,
+     16384.0
+    ],
+    "vertices": 30817,
+    "triangles": 61024,
+    "min": [
+     0.0,
+     0.0,
+     21.313
+    ],
+    "max": [
+     16384.0,
+     16384.0,
+     377.717
+    ]
+   },
+   {
+    "name": "desert_C_23",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     16384.0,
+     0.0,
+     16384.0
+    ],
+    "vertices": 7297,
+    "triangles": 14272,
+    "min": [
+     16384.0,
+     0.0,
+     2.156
+    ],
+    "max": [
+     32768.0,
+     16384.0,
+     394.057
+    ]
+   },
+   {
+    "name": "desert_C_30",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -32768.0,
+     16384.0,
+     16384.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     -32768.0,
+     16384.0,
+     -35.09
+    ],
+    "max": [
+     -16384.0,
+     32768.0,
+     32.585
+    ]
+   },
+   {
+    "name": "desert_C_31",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     -16384.0,
+     16384.0,
+     16384.0
+    ],
+    "vertices": 4225,
+    "triangles": 8192,
+    "min": [
+     -16384.0,
+     16384.0,
+     3.508
+    ],
+    "max": [
+     0.0,
+     32768.0,
+     38.466
+    ]
+   },
+   {
+    "name": "desert_C_32",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     0.0,
+     16384.0,
+     16384.0
+    ],
+    "vertices": 7297,
+    "triangles": 14272,
+    "min": [
+     0.0,
+     16384.0,
+     2.041
+    ],
+    "max": [
+     16384.0,
+     32768.0,
+     409.061
+    ]
+   },
+   {
+    "name": "desert_C_33",
+    "ring": "C",
+    "file": "desert_C.glb",
+    "square": [
+     16384.0,
+     16384.0,
+     16384.0
+    ],
+    "vertices": 7297,
+    "triangles": 14272,
+    "min": [
+     16384.0,
+     16384.0,
+     -37.049
+    ],
+    "max": [
+     32768.0,
+     32768.0,
+     299.837
+    ]
+   }
+  ],
+  "quantization": {
+   "scale": [
+    2.0,
+    2.0,
+    0.0078125
+   ],
+   "offset": [
+    0.0,
+    0.0,
+    182.0
+   ]
+  },
+  "masks": {
+   "_DMA": [
+    [
+     "town",
+     5000.0
+    ],
+    [
+     "sand",
+     168.0
+    ],
+    [
+     "esc",
+     246.0
+    ],
+    [
+     "mtn",
+     368.0
+    ]
+   ],
+   "_DMB": [
+    [
+     "sheet",
+     1.0
+    ],
+    [
+     "bed",
+     1.0
+    ],
+    [
+     "bar",
+     1.0
+    ],
+    [
+     "apron",
+     23.0
+    ]
+   ]
+  },
+  "vertices": 2493312,
+  "faces": 2506656,
+  "z": [
+   -46.0,
+   409.061
+  ]
+ },
+ "scrub": {
+  "file": "desert_scrub.glb",
+  "shrubs": 5657,
+  "kinds": [
+   1388,
+   1471,
+   1383,
+   1415
+  ]
+ },
+ "marks": [
+  {
+   "file": "near_marks.png",
+   "reach": 2048.0,
+   "size": [
+    4096,
+    4096
+   ],
+   "channels": "R tracks, G wadi beds (0.6) and their bars (to 1), B the floor's drainage lines, A the sand sheet"
+  },
+  {
+   "file": "mid_marks.png",
+   "reach": 8192.0,
+   "size": [
+    4096,
+    4096
+   ],
+   "channels": "R tracks, G wadi beds (0.6) and their bars (to 1), B the floor's drainage lines, A the sand sheet"
+  }
+ ],
+ "views": [
+  [
+   "ring_c_mY",
+   [
+    0.0,
+    0.0,
+    75.0
+   ],
+   [
+    -0.0,
+    -100.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_c_pY",
+   [
+    0.0,
+    0.0,
+    75.0
+   ],
+   [
+    0.0,
+    100.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_c_mX",
+   [
+    0.0,
+    0.0,
+    75.0
+   ],
+   [
+    -100.0,
+    0.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_c_pX",
+   [
+    0.0,
+    0.0,
+    75.0
+   ],
+   [
+    100.0,
+    0.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_w_mY",
+   [
+    -380.0,
+    0.0,
+    75.0
+   ],
+   [
+    -380.0,
+    -100.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_w_pY",
+   [
+    -380.0,
+    0.0,
+    75.0
+   ],
+   [
+    -380.0,
+    100.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_w_mX",
+   [
+    -380.0,
+    0.0,
+    75.0
+   ],
+   [
+    -480.0,
+    0.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_w_pX",
+   [
+    -380.0,
+    0.0,
+    75.0
+   ],
+   [
+    -280.0,
+    0.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_e_mY",
+   [
+    380.0,
+    0.0,
+    75.0
+   ],
+   [
+    380.0,
+    -100.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_e_pY",
+   [
+    380.0,
+    0.0,
+    75.0
+   ],
+   [
+    380.0,
+    100.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_e_mX",
+   [
+    380.0,
+    0.0,
+    75.0
+   ],
+   [
+    280.0,
+    0.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "ring_e_pX",
+   [
+    380.0,
+    0.0,
+    75.0
+   ],
+   [
+    480.0,
+    0.0,
+    60.9459
+   ],
+   35
+  ],
+  [
+   "close_cliff_and_talus",
+   [
+    -452.3327,
+    1144.9367,
+    95.0
+   ],
+   [
+    -930.0,
+    2354.0,
+    62.3959
+   ],
+   50
+  ],
+  [
+   "close_dunes",
+   [
+    0.0,
+    -938.0,
+    75.0
+   ],
+   [
+    -250.0,
+    -1938.0,
+    22.1303
+   ],
+   45
+  ]
+ ],
+ "chain": {
+  "mesh": {
+   "k": 0.0016,
+   "max_level": 10,
+   "line": [
+    -400.0,
+    400.0
+   ],
+   "vertices": 2493312,
+   "faces": 2506656,
+   "shrubs": 5657,
+   "leaves_per_level": {
+    "3": 44,
+    "4": 48,
+    "5": 74,
+    "6": 101,
+    "7": 270,
+    "8": 557,
+    "9": 571,
+    "10": 783
+   }
+  },
+  "land": {
+   "grid": "film",
+   "levels": [
+    [
+     "A",
+     2048.0,
+     1.0
+    ],
+    [
+     "B",
+     8192.0,
+     4.0
+    ],
+    [
+     "C",
+     32768.0,
+     16.0
+    ]
+   ],
+   "tracks": "plan"
+  },
+  "sources": {
+   "quality": "film",
+   "recipes": {
+    "dunes": {
+     "recipe": "dunes",
+     "seed": 1,
+     "params": {
+      "kind": "star"
+     }
+    },
+    "mesas": {
+     "recipe": "mesas_buttes",
+     "seed": 1,
+     "params": {
+      "caprock_fraction": 0.08,
+      "relief_m": 320.0,
+      "floor_zs_m": 140.0,
+      "weathering_m_per_yr": 0.00022,
+      "fraying": 3.0,
+      "detail": true
+     }
+    },
+    "range": {
+     "recipe": "fluvial_range",
+     "seed": 1,
+     "params": {
+      "relief_m": 2000.0,
+      "valley_spacing_m": 320.0,
+      "threshold_deg": 29.0,
+      "age_myr": 2.0,
+      "roughness": 0.6,
+      "rock_contrast": 0.35,
+      "deposition": 0.5,
+      "floor_width_m": 170.0,
+      "trunk_faults": 3.5,
+      "rock": 1.0,
+      "gullies": true,
+      "uplift": "ridge",
+      "azimuth_deg": 70.0,
+      "detail": true
+     }
+    }
+   }
+  }
+ }
+}

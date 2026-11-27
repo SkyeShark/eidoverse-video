@@ -77,13 +77,15 @@ export const BOARDS = [[[0.30, 0.05, 0.04], [0.62, 0.60, 0.55]], [[0.05, 0.12, 0
     [[0.50, 0.48, 0.42], [0.05, 0.12, 0.28]], [[0.40, 0.14, 0.05], [0.60, 0.58, 0.52]]];
 
 // ==================================================================================================== the node layer
-function kit(THREE) {
+// (position, normal: other nodes for the object's own point and normal, e.g. three's positionLocal and normalLocal on
+// an instanced mesh whose placings are in the town's metres; the desert's look reads its land this way)
+export function kit(THREE, { position = null, normal = null } = {}) {
     const T = THREE;
     const { float, vec2, vec3, vec4, abs, clamp, mix, max, min, select, smoothstep, texture, dot, normalize, floor, fract, sin, exp,
         length, mx_noise_float, attribute } = T;
     const num = (x) => (typeof x === 'number' ? float(x) : Array.isArray(x) ? vec3(x[0], x[1], x[2]) : x);
-    const P0 = attribute('position', 'vec3');                        // the point in the object's own metres (+Z up)
-    const N0 = normalize(attribute('normal', 'vec3'));               // its normal there
+    const P0 = position ?? attribute('position', 'vec3');            // the point in the object's own metres (+Z up)
+    const N0 = normalize(normal ?? attribute('normal', 'vec3'));     // its normal there
     const inst = attribute('inst', 'vec4');                          // (random, how near a strike, 1 on the ground/streets, 0)
     const rnd = inst.x;
     const X = P0.x, Y = P0.y, Z = P0.z;
@@ -181,7 +183,45 @@ function kit(THREE) {
         return texture(tex, ux).mul(w.x).add(texture(tex, uy).mul(w.y)).add(texture(tex, uz).mul(w.z));
     }
     return { T, float, vec2, vec3, vec4, num, P0, N0, inst, rnd, X, Y, Z, nz, sm, inv, lin, mixf, mixc, value, rnd2, Ps, wall, up, along,
-        noise, wnoise, vor, palette, boxAt, max, min, abs, clamp, mix, fract, floor, exp, select, dot, texture };
+        noise, wnoise, vor, palette, boxWeights, boxAt, max, min, abs, clamp, mix, fract, floor, exp, select, dot, texture };
+}
+
+// THE PLAIN'S GROUNDS and a track's surface, over any source of the sets' colour (ncol(key, P, proj, k, scale): a set's
+// colour divided by its own mean): the town's own textures in makeLook, the desert's texture array in
+// eidoverse/sets/desert/look.js. One pair of functions in the same metres, so a road's sanded end goes over into
+// exactly the ground beside it, and the desert rises out of the town's plane without a seam.
+export function groundFns(k, ncol) {
+    const { float, vec3, num, sm, inv, mixc, value, noise, abs, min } = k;
+    const tint = (n, rgb) => min(num(n).mul(num(rgb)), vec3(0.82, 0.82, 0.82));
+    const groundPlain = (P) => {
+        const two = sm(noise(P, 1.0 / 30.0, 2.0, { off: [7.0, 2.0, 0.0] }), 0.3, 0.7);
+        const c_s = mixc(two, ncol('sand', P, 'FLAT', 0.65), ncol('sand', P, 'FLAT', 0.65, 3.9));
+        const c_d = mixc(two, ncol('dry_ground', P, 'FLAT', 0.75, 2.7), ncol('dry_ground', P, 'FLAT', 0.75));
+        const c_g = ncol('gravel_ground', P, 'FLAT', 0.75);
+        const c_w = ncol('dry_grass', P, 'FLAT', 0.9);
+        const s1 = noise(P, 1.0 / 70.0, 3.0, { off: [3.0, 1.0, 0.0] }), s2 = noise(P, 1.0 / 26.0, 3.0, { off: [9.0, 4.0, 0.0] });
+        const s3 = noise(P, 1.0 / 7.0, 2.0, { off: [1.0, 7.0, 0.0] });
+        const w_d = sm(s1.add(s3.sub(0.5).mul(0.3)), 0.53, 0.60);
+        const w_g = sm(s2.add(s3.sub(0.5).mul(0.3)), 0.57, 0.63);
+        const w_w = sm(noise(P, 1.0 / 45.0, 3.0, { off: [6.0, 6.0, 0.0] }).add(s3.sub(0.5).mul(0.3)), 0.62, 0.68).mul(0.9);
+        let g = mixc(w_d, c_s, c_d);
+        g = mixc(w_g.mul(0.85), g, c_g);
+        g = mixc(w_w, g, c_w);
+        let tnt = mixc(sm(noise(P, 1.0 / 380.0, 3.0, { off: [31.0, 7.0, 0.0] }), 0.35, 0.65), [0.40, 0.335, 0.24], [0.35, 0.28, 0.19]);
+        tnt = mixc(sm(noise(P, 1.0 / 130.0, 3.0, { off: [3.0, 17.0, 0.0] }), 0.5, 0.72).mul(0.6), tnt, [0.31, 0.27, 0.21]);
+        let col = tint(g, tnt);
+        col = value(col, float(0.9).add(noise(P, 1.0 / 900.0, 3.0, { off: [1.0, 2.0, 0.0] }).mul(0.22)));
+        const scrub = sm(noise(P, 0.55, 2.0, { off: [9.0, 9.0, 0.0] }), 0.66, 0.74).mul(sm(noise(P, 0.018, 3.0, { off: [5.0, 2.0, 0.0] }), 0.52, 0.66));
+        return mixc(scrub.mul(0.65), col, vec3(0.12, 0.12, 0.07));
+    };
+    // a track's packed gravel with two ruts where the wheels go (across: from its middle line)
+    const trackSurface = (P, across) => {
+        let col = tint(ncol('gravel_ground', P, 'FLAT', 0.85), [0.38, 0.32, 0.23]);
+        col = value(col, float(0.9).add(noise(P, 0.08, 3.0).mul(0.22)));
+        const rut = inv(sm(abs(abs(across).sub(0.82)), 0.08, 0.3));
+        return mixc(rut.mul(0.5), col, value(col, 0.8));
+    };
+    return { groundPlain, trackSurface, tint };
 }
 
 // ==================================================================================================== the look
@@ -431,35 +471,8 @@ export async function makeLook(THREE, { strikes = [], paved = [450, 160], sandRe
         }
         return [col, rgh, 0.0];
     };
-    // the plain's grounds -> colour: one function, so a road's sanded end goes over into exactly the ground beside it
-    const groundPlain = (P) => {
-        const two = sm(noise(P, 1.0 / 30.0, 2.0, { off: [7.0, 2.0, 0.0] }), 0.3, 0.7);
-        const c_s = mixc(two, ncol('sand', P, 'FLAT', 0.65), ncol('sand', P, 'FLAT', 0.65, 3.9));
-        const c_d = mixc(two, ncol('dry_ground', P, 'FLAT', 0.75, 2.7), ncol('dry_ground', P, 'FLAT', 0.75));
-        const c_g = ncol('gravel_ground', P, 'FLAT', 0.75);
-        const c_w = ncol('dry_grass', P, 'FLAT', 0.9);
-        const s1 = noise(P, 1.0 / 70.0, 3.0, { off: [3.0, 1.0, 0.0] }), s2 = noise(P, 1.0 / 26.0, 3.0, { off: [9.0, 4.0, 0.0] });
-        const s3 = noise(P, 1.0 / 7.0, 2.0, { off: [1.0, 7.0, 0.0] });
-        const w_d = sm(s1.add(s3.sub(0.5).mul(0.3)), 0.53, 0.60);
-        const w_g = sm(s2.add(s3.sub(0.5).mul(0.3)), 0.57, 0.63);
-        const w_w = sm(noise(P, 1.0 / 45.0, 3.0, { off: [6.0, 6.0, 0.0] }).add(s3.sub(0.5).mul(0.3)), 0.62, 0.68).mul(0.9);
-        let g = mixc(w_d, c_s, c_d);
-        g = mixc(w_g.mul(0.85), g, c_g);
-        g = mixc(w_w, g, c_w);
-        let tnt = mixc(sm(noise(P, 1.0 / 380.0, 3.0, { off: [31.0, 7.0, 0.0] }), 0.35, 0.65), [0.40, 0.335, 0.24], [0.35, 0.28, 0.19]);
-        tnt = mixc(sm(noise(P, 1.0 / 130.0, 3.0, { off: [3.0, 17.0, 0.0] }), 0.5, 0.72).mul(0.6), tnt, [0.31, 0.27, 0.21]);
-        let col = tint(g, tnt);
-        col = value(col, float(0.9).add(noise(P, 1.0 / 900.0, 3.0, { off: [1.0, 2.0, 0.0] }).mul(0.22)));
-        const scrub = sm(noise(P, 0.55, 2.0, { off: [9.0, 9.0, 0.0] }), 0.66, 0.74).mul(sm(noise(P, 0.018, 3.0, { off: [5.0, 2.0, 0.0] }), 0.52, 0.66));
-        return mixc(scrub.mul(0.65), col, vec3(0.12, 0.12, 0.07));
-    };
-    // a track's packed gravel with two ruts where the wheels go (across: from its middle line)
-    const trackSurface = (P, across) => {
-        let col = tint(ncol('gravel_ground', P, 'FLAT', 0.85), [0.38, 0.32, 0.23]);
-        col = value(col, float(0.9).add(noise(P, 0.08, 3.0).mul(0.22)));
-        const rut = inv(sm(abs(abs(across).sub(0.82)), 0.08, 0.3));
-        return mixc(rut.mul(0.5), col, value(col, 0.8));
-    };
+    // the plain's grounds and a track's surface (groundFns): the same functions the desert goes on from
+    const { groundPlain, trackSurface } = groundFns(k, ncol);
     // (across, half width, along) of a road's lane frame: tlS holds its middle line and half width; tmB.x 1: a street
     // along y (road:y, track:y)
     const laneFrame = () => { const isY = isKind(float(1)); return [k.select(isY, X, Y).sub(tlS.x), tlS.y, k.select(isY, Y, X)]; };

@@ -21,6 +21,7 @@ and whole enclosed sets.
 | The ocean of faces (a headland at night) | [`eidoverse/sets/ocean.js`](../eidoverse/sets/ocean.js) + [`ocean/*.js`](../eidoverse/sets/ocean/) | [`sets/ocean/`](../eidoverse/assets/sets/ocean/README.md) + `models/ocean_*.glb` |
 | UNKNOWN FORCE: a night megacity round a sunken well, a quiet room, a showroom, a gold corridor, a data centre, a race on an elevated highway and a canyon of paper | [`eidoverse/sets/unknown_force/`](../eidoverse/sets/unknown_force/README.md) (14 modules) | none of its own ([sources](../eidoverse/sets/unknown_force/SOURCES.md)) |
 | SAME SEED: a sealed room, a kitchen at noon, a lab full of light and a room at 2 a.m., made in Blender ([below](#the-same-seed-rooms)) | [`eidoverse/sets/same_seed.js`](../eidoverse/sets/same_seed.js) + [`same_seed/*.js`](../eidoverse/sets/same_seed/) | [`sets/same_seed/`](../eidoverse/assets/sets/same_seed/README.md) + `models/same_seed_*.glb` |
+| The desert round the town out to 32.8 km, the Blender edition's land ([below](#the-desert)) | [`eidoverse/sets/desert/`](../eidoverse/sets/desert/index.js) | [`models/desert/`](../eidoverse/assets/models/desert/README.md) |
 
 Every asset folder has a README, and a SOURCES file recording licences and
 provenance. A sibling `<name>_src/` folder holds the Blender scripts that
@@ -744,6 +745,111 @@ Next to the Blender edition's stills the three.js town has the same
 buildings, streets, cars, trees and shadows in every lens. It is a little
 paler and cooler in the distance: the haze is a fog, not a lit volume, and
 the sky's fill is the sky package's, not Cycles-like bounce light.
+
+## The desert
+
+`eidoverse/sets/desert/` is the desert round the town, out to 32.8 km: a basin
+floor rising out of the town's plane, a braided wadi and its tributaries, star
+dunes, an escarpment with its outliers, inselbergs and ranges drowned in their
+own alluvium, tracks going on from the town's, and low scrub on the sand it
+caught. The land is the Blender edition's own (`eidoblend.sets.desert`): its
+chain composes it from the terrain family's simulations, and its output (the
+quadtree mesh and its masks, the scrub's places, the marks finer than the mesh)
+is exported into [`eidoverse/assets/models/desert/`](../eidoverse/assets/models/desert/README.md)
+(20 MB). The look is the Blender material in TSL, going on from the town's
+ground.
+
+```js
+const DESERT = await import(new URL('sets/desert/index.js', EIDOVERSE_DIR).href);
+const desert = await DESERT.build(THREE, { renderer });      // about 5 s
+scene.add(desert.group);
+const TOWN = await import(new URL('sets/town/index.js', EIDOVERSE_DIR).href);
+const town = await TOWN.build(THREE);                         // the town it was made round
+scene.add(town.group);
+const W = await DESERT.world(THREE, { scene, camera, renderer, roots: [desert.group, town.group] });
+const [name, pos, target, lens] = desert.views()[1];         // the Blender edition's lenses on it
+DESERT.aim(THREE, camera, desert.group, pos, target, lens);
+// per frame:
+W.update(t);
+```
+
+- **Its space.** The town's metres, +Z up, under a group turned into three's
+  +Y up, as the town's group is: put the two together, unscaled. The desert
+  lies under the town's plane (z −0.5) wherever the town has anything on the
+  ground and rises through z 0 about 25 m out, so the town's own ground stays
+  as it is. It was made round the default town (840 × 300 m, seed 7). Give the
+  camera a far plane of 33 km or more (the example's lens: 1 m to 40 km).
+- **Options.** `scrub: false`, `shadows: false`, `res` (one CC0 resolution
+  for every set). `plane: true` lays the town's plane (its ground, 3.2 km
+  square at z 0) where the town would stand, for a desert with no town in it.
+- **The land.** Three GLBs, the rings within 2,048 m, 8,192 m and 32,768 m of
+  the town, 48 tiles: 2.49 M vertices and 4.98 M triangles, the cells 2 m
+  round the town and along the line the lenses fly, 256 m at the edge. Each
+  vertex carries Blender's normal and the land's masks (the distance from the
+  town, the sand's depth, the escarpment's and the ranges' heights, the sand
+  sheet, the wadi bed, the bars and the aprons). The scrub is 5,657 shrubs of
+  four kinds, instanced, each with its own number, each on its mound of sand.
+- **The look** is the Blender material node for node: the town's own plain
+  (`groundPlain` in `sets/town/look.js`, the same function in the same
+  metres, so there is no seam where the desert rises out of the plane), then
+  desert pavement and pale silt on the older surfaces, the far floor's
+  varnished gravel, the floor's drainage lines, the aprons' fans, the wadis'
+  pale beds and their bars, the tracks in the town's track set, the sand
+  sheet, the dunes (ripples to windward, smooth slip faces), the escarpment's
+  beds, scree and caprock, the ranges' dark rock and debris, a slow variation
+  at the kilometre, and the relief of the ripples and the cliff rock as
+  Blender's Bump. Its sixteen CC0 sets (the town's five, the desert's eleven
+  in `sets/desert/cc0_sets.json`) are fetched by ID and read from one texture
+  array: WebGPU binds 16 textures to a shader stage, and the marks, the sun's
+  shadow and the sky's light need room beside them. What is finer than the
+  mesh (the tracks, the beds and bars, the drainage lines, the sand sheet)
+  comes from two pictures, 1 m within 2 km and 4 m out to 8 km. Past 4 km the
+  land thins into the sky's low colour by its distance from the lens, as the
+  Blender material's emission mix does.
+- **`world()`** is the town's (its sun, makeSky's sky at the hour that stands
+  it there, the dusty tints, the exposure; it turns the desert and the town
+  together) with the town's dust held as EEVEE holds it: in the volume's box
+  (5.2 km across, 900 m high) and out to 3.5 km along each ray, not a fog to
+  the horizon, so the inselbergs and the ranges show through it; the dust lit
+  brighter toward the sun (its phase at the volume's anisotropy, 0.45); and
+  laid over the sky as well, as EEVEE draws the world through the volume. Its
+  sun casts one 8192 shadow map 1.6 km across round the lens's ground point.
+- **Another desert.** The Blender edition makes another (round another town,
+  `--town WxH`; round no town, `--plain WxH`; or with `land.PLAN` changed), and
+  [`desert_src/`](../eidoverse/assets/models/desert_src/README.md) exports it
+  into this library.
+
+`eidoverse/examples/desert/` shows it through the Blender edition's lenses,
+one a second: `scene.json` the desert alone (the ring of twelve from 75 m over
+the town's middle and its two ends, the nearest cliff band, the nearest high
+dunes), `town.json` the town standing in it with the town's own
+`pull_back_35mm` and `across_to_the_edge_40mm` (sixteen, as the Blender edition
+shoots them). The examples turn the post chain's AO off
+(`globalThis._aoParams = { enabled: false }`): its 0.3 m samples speckle a
+floor seen kilometres off at a grazing angle, and at these heights it darkens
+nothing the eye can find.
+
+Measured at 960 × 540 on an RTX 5090 Laptop GPU: the desert builds in 4.2 to
+4.7 s (the town beside it in about 8 s). With the town in it, the first frame
+took 127 to 142 s the first time the pipelines compiled and 39 s once the
+driver had them cached; a lens that brings new materials into view costs its
+compile once, and the other frames take about a quarter of a second. The sixteen
+lenses ran in 126 s with the cache warm, the process peaking at 6.8 GB of RAM
+(10 to 12 GB while the pipelines compile).
+
+Next to the Blender edition's sixteen stills the three.js desert has the same
+land in every lens: the dunes, the escarpment and its outliers, the
+inselbergs, the wadis, the tracks and the scrub stand where they stand there.
+Measured in levels of 255 (the mean of a patch, three.js minus Blender): the
+near and middle floor −2 to +2, the cliff band close to +0 to +2, the big dune
++1 to +5, the sky +0 to +5, the floor 2 to 3 km off and the escarpment's face
++3 to +6, the horizon +3 to +8 (most where the lens looks away from the sun).
+The inselbergs 5 to 6 km off are 6 to 10 lighter and read a little pink beside
+Blender's grey: the sun's shadow map (1.6 km across) does not reach them, where
+EEVEE shadows everything. The shrubs past a kilometre read fainter: EEVEE's
+sixteen samples a pixel give a shrub a pixel wide its whole darkness, one
+sample and FXAA give it less. The town in it is the town's own three.js look,
+a little greyer and cooler than the Blender town.
 
 ## Costs
 
