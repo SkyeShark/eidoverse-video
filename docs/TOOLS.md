@@ -296,6 +296,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [procedural.py](../blender/eidoblend/materials/procedural.py) | `procedural_materials.js`: generators, height-to-normal, compositing, the six factories | [procedural-materials](../tools-guides/procedural-materials.md) |
 | [\_gen.py](../blender/eidoblend/materials/_gen.py) | The canvas maths in numpy (no bpy) | [procedural-materials](../tools-guides/procedural-materials.md) |
 | [layered.py](../blender/eidoblend/materials/layered.py) | ONE layered material on a baked asset's maps (`baked_material`, `Substrate`, `load_bake`), and `NT`, the node-building layer asset looks are written in | [procedural-materials](../tools-guides/procedural-materials.md) |
+| [photo.py](../blender/eidoblend/materials/photo.py) | Materials as one Principled BSDF over CC0 photographic sets at their real size (`Mat`: `NT`'s maths plus pictures, coordinates, normal maps, a set's light and shade on a colour of its own); `Library`, a piece's CC0 manifest (`cc0.json`: textures, Poly Haven models, HDRIs) fetched by ID on first use; `box_uv` (a UV in metres from each face's plane), `planar_uv` (a picture over a sheet) | [props-and-sets](../tools-guides/props-and-sets.md#the-same-seed-rooms) |
 
 ### Screens, type, books and sound (`eidoblend.media`)
 
@@ -335,7 +336,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 
 | Module | Role | Instructions |
 | --- | --- | --- |
-| [\_\_init\_\_.py](../blender/eidoblend/props/__init__.py) | The props by name: eight historical voice machines (1939–2001), the 1896 tandem, the carbine and the helicopter; the era kit for new props in their style; the hard-surface kit | [voice-machines](../tools-guides/voice-machines.md), [props-and-sets](../tools-guides/props-and-sets.md) |
+| [\_\_init\_\_.py](../blender/eidoblend/props/__init__.py) | The props by name: eight historical voice machines (1939–2001), the 1896 tandem, the carbine and the helicopter, the houseplants; the era kit for new props in their style; the hard-surface kit | [voice-machines](../tools-guides/voice-machines.md), [props-and-sets](../tools-guides/props-and-sets.md) |
 | [tandem.py](../blender/eidoblend/props/tandem.py) | The 1896 tandem, its VRM rider rig and springs, the teapot stoker | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [hardsurface/\_\_init\_\_.py](../blender/eidoblend/props/hardsurface/__init__.py) | The hard-surface kit: a measured high, a low from the same tables, a GPU bake, one layered material | [blender](../tools-guides/blender.md) |
 | [hardsurface/masses.py](../blender/eidoblend/props/hardsurface/masses.py) | The mass constructor: prisms intersected, features unioned, cutters through, one bevel per edge group (`tagged`, `finish_forged`), the low from the same tables | [blender](../tools-guides/blender.md) |
@@ -351,6 +352,11 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [helicopter/\_\_init\_\_.py](../blender/eidoblend/props/helicopter/__init__.py) | A UH-60-pattern helicopter: `build()` appends the made asset, `spin()` keys its rotors; `datum`, `high` and its assemblies build it, `decals` draws its pictures, `look` its masks and materials | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [helicopter/cli.py](../blender/eidoblend/props/helicopter/cli.py) | Blender CLI: the helicopter's high, look and stills | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [helicopter/make.py](../blender/eidoblend/props/helicopter/make.py) | CLI: the helicopter made from nothing, step by step (stdlib) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [houseplants/\_\_init\_\_.py](../blender/eidoblend/props/houseplants/__init__.py) | The houseplants by species (`build`, `build_group`, `SPECIES`): a rubber plant, a Monstera on its coir pole, a corn plant, the basil, a watering can, each grown and dressed | [props-and-sets](../tools-guides/props-and-sets.md#the-houseplants) |
+| [houseplants/kit.py](../blender/eidoblend/props/houseplants/kit.py) | What grows and what is moulded: noise, splines and frames, leaves as thin solids carrying their own data, limbs, lumps | [props-and-sets](../tools-guides/props-and-sets.md#the-houseplants) |
+| [houseplants/plants.py](../blender/eidoblend/props/houseplants/plants.py) | The rubber plant, the Monstera (its cut leaves), the corn plant, the watering can, and the garden that keeps every blade clear of what grew before it | [props-and-sets](../tools-guides/props-and-sets.md#the-houseplants) |
+| [houseplants/basil.py](../blender/eidoblend/props/houseplants/basil.py) | The pot of sweet basil | [props-and-sets](../tools-guides/props-and-sets.md#the-houseplants) |
+| [houseplants/look.py](../blender/eidoblend/props/houseplants/look.py) | The plants' materials over their CC0 sets (`cc0.json`): the leaves per species, stems, bark, the coir, the soils and the pots | [props-and-sets](../tools-guides/props-and-sets.md#the-houseplants) |
 | [voice\_machines/\_\_init\_\_.py](../blender/eidoblend/props/voice_machines/__init__.py) | The registry (`build(name)`), the screens and the era-2 kit the machines share | [voice-machines](../tools-guides/voice-machines.md) |
 | [voice\_machines/voder.py](../blender/eidoblend/props/voice_machines/voder.py) | The 1939 Voder, and the era-1 craft kit (role materials, a 2D canvas, three geometries, the keyer) | [voice-machines](../tools-guides/voice-machines.md) |
 | [voice\_machines/mainframe.py](../blender/eidoblend/props/voice_machines/mainframe.py) | The 1961 computer room | [voice-machines](../tools-guides/voice-machines.md) |
@@ -393,7 +399,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 
 | Module | Role | Instructions |
 | --- | --- | --- |
-| [\_\_init\_\_.py](../blender/eidoblend/sets/__init__.py) | The registry of the DAISY and UNKNOWN FORCE scenes and this edition's places (`places.town`, `places.desert`) (`sets.list` / `get` / `build` / `register`), each loaded on first use | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [\_\_init\_\_.py](../blender/eidoblend/sets/__init__.py) | The registry of the DAISY and UNKNOWN FORCE scenes, this edition's places (`places.town`, `places.desert`) and the SAME SEED rooms (`same_seed.<room>`) (`sets.list` / `get` / `build` / `register`), each loaded on first use | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [daisy/\_\_init\_\_.py](../blender/eidoblend/sets/daisy/__init__.py) | The DAISY scenes, their looks (`STATES`) and their default clock | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [daisy/funeral.py](../blender/eidoblend/sets/daisy/funeral.py) | A SoMa warehouse vigil: mourners, candles, the bier, phones in the dark | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [daisy/bridge.py](../blender/eidoblend/sets/daisy/bridge.py) | The Golden Gate in fog | [props-and-sets](../tools-guides/props-and-sets.md) |
@@ -452,6 +458,16 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [desert/look.py](../blender/eidoblend/sets/desert/look.py) | The collection `desert` and its one material from the town's ground on; its views (`build`, `shoot`) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [desert/cli.py](../blender/eidoblend/sets/desert/cli.py) | Blender CLI: the desert's sources, mask and look steps | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [desert/make.py](../blender/eidoblend/sets/desert/make.py) | CLI: the desert made from nothing, step by step (stdlib) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [same\_seed/\_\_init\_\_.py](../blender/eidoblend/sets/same_seed/__init__.py) | The SAME SEED film's four rooms (`ROOMS`, `info`, `build`): made once by their chains, appended where wanted | [props-and-sets](../tools-guides/props-and-sets.md#the-same-seed-rooms) |
+| [same\_seed/make.py](../blender/eidoblend/sets/same_seed/make.py) | CLI (stdlib): a room made from nothing, step by step (high, lows, GPU bake, prints, look, stills), each step its own process | [props-and-sets](../tools-guides/props-and-sets.md#making-a-room) |
+| [same\_seed/cli.py](../blender/eidoblend/sets/same_seed/cli.py) | Blender CLI: one room's step (high, lows, look, stills) | [props-and-sets](../tools-guides/props-and-sets.md#making-a-room) |
+| [same\_seed/room.py](../blender/eidoblend/sets/same_seed/room.py) | A made room appended into a scene under its root Empty (`append`, `Room`: parts, lights, probes, marks, cameras, `dispose`) | [props-and-sets](../tools-guides/props-and-sets.md#a-room-in-a-scene-of-your-own) |
+| [same\_seed/look.py](../blender/eidoblend/sets/same_seed/look.py) | What the rooms' looks share: the GPU bake's maps on a low (`baked`), bands from an arris, the render settings (`eevee`), glTF import, cameras and stills, the volume probe's bake, saving | [props-and-sets](../tools-guides/props-and-sets.md#the-same-seed-rooms) |
+| [same\_seed/bake.py](../blender/eidoblend/sets/same_seed/bake.py) | A room's lows for the GPU baker: each part's low from its own construction, UVs at true size weighted by what the lenses see, packing, and the atlas export through the hard-surface kit's exporter | [props-and-sets](../tools-guides/props-and-sets.md#making-a-room) |
+| [same\_seed/sealed\_room/\_\_init\_\_.py](../blender/eidoblend/sets/same_seed/sealed_room/__init__.py) | The sealed room: its marks, cameras, render settings and look options; `room.py` (the shell and fixtures), `bench.py` (the welded bench, high and low), `high.py`, `lows.py`, `look.py` | [props-and-sets](../tools-guides/props-and-sets.md#the-same-seed-rooms) |
+| [same\_seed/kitchen/\_\_init\_\_.py](../blender/eidoblend/sets/same_seed/kitchen/__init__.py) | The kitchen at noon: its marks, cameras, render settings and look options; `kit.py` and the groups `shell.py`, `cabinets.py`, `fridge.py`, `table.py`, `things.py`, `high.py`, `lows.py` (its Cycles bake), `prints.py`, `look.py` | [props-and-sets](../tools-guides/props-and-sets.md#the-same-seed-rooms) |
+| [same\_seed/lab/\_\_init\_\_.py](../blender/eidoblend/sets/same_seed/lab/__init__.py) | The lab full of light: its marks, cameras, render settings and look options; `kit.py`, `shell.py`, `furniture.py`, `high.py` (the houseplants grown in place), `lows.py`, `prints.py`, `look.py` | [props-and-sets](../tools-guides/props-and-sets.md#the-same-seed-rooms) |
+| [same\_seed/desk/\_\_init\_\_.py](../blender/eidoblend/sets/same_seed/desk/__init__.py) | The room at 2 a.m.: its marks, cameras, render settings and look options; `kit.py` (its named clays) and the groups `shell.py`, `furniture.py`, `computer.py`, `guitar.py`, `things.py`, `models.py` (the Poly Haven pieces), `books.py`, `high.py`, `lows.py`, `prints.py`, `look.py` | [props-and-sets](../tools-guides/props-and-sets.md#the-same-seed-rooms) |
 
 ### The sky (`eidoblend.sky`) and the weather (`eidoblend.weather`)
 

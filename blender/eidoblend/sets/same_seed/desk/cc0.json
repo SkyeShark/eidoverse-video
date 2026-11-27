@@ -1,0 +1,13 @@
+{
+ "about": "the desk room's CC0 library, fetched by ID on first use into eidoverse/assets/cache/ (Poly Haven and ambientCG; every one CC0); the Poly Haven pieces are placed by models.py as they ship",
+ "textures": ["PaintedPlaster017_2k", "Plaster001_2k", "oak_wood_planks_2k", "oak_veneer_01_2k", "white_maple_veneer_2k", "rosewood_veneer1_2k",
+              "lacquered_cherry_wood_2k", "Paint004_2k", "Plastic013A_2k", "Rubber004_2k", "Metal009_2k", "Metal038_2k", "Fingerprints002_2k",
+              "Fingerprints008_2k", "Fabric034_2k", "Fabric039_1k", "Fabric023_1k", "rough_linen_2k", "Carpet016_2k", "book_pattern_2k",
+              "Paper001_2k", "Leather037_2k", "Granite005A_2k"],
+ "models": [{"id": "desk_lamp_arm_01", "res": "2k"}, {"id": "steel_frame_shelves_01", "res": "1k"}, {"id": "steel_frame_shelves_02", "res": "1k"},
+            {"id": "potted_plant_02", "res": "1k"}, {"id": "potted_plant_04", "res": "1k"}, {"id": "dining_chair_02", "res": "1k"},
+            {"id": "modern_ceiling_lamp_01", "res": "1k"}, {"id": "wall_clock", "res": "1k"}, {"id": "hanging_picture_frame_01", "res": "1k"},
+            {"id": "stationery_supplies", "res": "1k"}, {"id": "boombox", "res": "1k"}, {"id": "book_encyclopedia_set_01", "res": "1k"},
+            {"id": "standing_picture_frame_01", "res": "1k"}],
+ "hdris": [{"id": "hansaplatz", "res": "4k"}]
+}

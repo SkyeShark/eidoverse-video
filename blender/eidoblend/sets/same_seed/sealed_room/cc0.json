@@ -1,0 +1,8 @@
+{
+ "about": "the sealed room's CC0 library, fetched by ID on first use into eidoverse/assets/cache/ (Poly Haven and ambientCG; every one CC0)",
+ "textures": ["concrete_block_wall_2k", "Paint004_2k", "linoleum_brown_2k", "PaintedPlaster017_2k", "Metal021_2k", "Metal027_2k",
+              "Metal038_2k", "Metal009_2k", "Rubber004_2k", "PaintedMetal014_2k"],
+ "models": [{"id": "metal_stool_02", "res": "1k"}, {"id": "security_camera_02", "res": "1k"},
+            {"id": "mounted_fluorescent_lights", "res": "1k"}],
+ "hdris": []
+}
