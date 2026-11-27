@@ -303,6 +303,11 @@ M += [py('sets_uf_interiors', 'test_art_parity.py', cwd='here'),
       bl('sets_uf_interiors', 'example_asset_use.py', '--no_render'),
       gpu('sets_uf_interiors', 'test_quiet_room.py'), gpu('sets_uf_interiors', 'test_showroom.py'),
       gpu('sets_uf_interiors', 'verify_probes.py', timeout=5400)]
+# the SAME SEED rooms and the houseplants: the plants built and checked (Blender), their stills; the four rooms made
+# from nothing by make.py (Blender steps, the GPU bake, the probes' bakes), checked, two small stills each
+M += [bl('sets_same_seed', 'test_houseplants.py', NR), gpu('sets_same_seed', 'test_houseplants.py'),
+      T('gpy', 'sets_same_seed', 'test_rooms.py', cap=20, vram=8, timeout=7200,
+        why='the four SAME SEED rooms made from nothing, checked through sets.build, two small stills each')]
 M += [py('sets_uf_race_bin', s) for s in ('race_parity.py', 'bin_parity.py', 'canvas_parity.py')]
 M += [bl('sets_uf_race_bin', 'test_race.py', '--build-only'), bl('sets_uf_race_bin', 'test_bin.py', '--build-only'),
       bl('sets_uf_race_bin', 'test_sections.py'),

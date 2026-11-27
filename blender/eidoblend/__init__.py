@@ -22,8 +22,9 @@ Each family of systems owns one subpackage. A scene script imports the ones it u
     materials    procedural textures and PBR material factories (procedural_materials.js)
     media        screens, type, overlays, subtitles, lyrics, books and the sound side
     fabrication  FDM printing, pocket milling and relief carving; fabrication.rotary: all-around carving
-    props        the DAISY props by name: eight historical voice machines and the 1896 tandem
-    sets         the DAISY and UNKNOWN FORCE sets, each a free reusable world on its own clock
+    props        props by name: the DAISY film's eight voice machines and 1896 tandem, the carbine, the helicopter,
+                 the houseplants; props.hardsurface, the hard-surface kit
+    sets         the DAISY and UNKNOWN FORCE sets, each a free reusable world on its own clock; the SAME SEED rooms
     xr           a Blender scene exported for a headset browser (WebXR, on the kit)
 
 Importing eidoblend imports nothing: a family loads when it is first imported or reached as an attribute, so

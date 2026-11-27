@@ -23,6 +23,12 @@ the bin), and the UNKNOWN FORCE interiors make_camera(name) for each set cam.
 Importing this package imports nothing: each set (bpy and the families it stands on) loads on first use, so listing
 the sets works in plain Python too. Availability is read from the files, without importing them. The two films'
 packages, sets.daisy (its clock: BAR, SECTIONS) and sets.unknown_force (its SETS table), load on first access too.
+
+THE SAME SEED ROOMS (sets.same_seed: the sealed room, the kitchen at noon, the lab full of light, the room at 2 a.m.)
+are made rather than built in the scene: each room's chain (sets/same_seed/make.py: high -> lows -> bake -> prints ->
+look) writes one .blend once, and build('same_seed.<room>', ctx) appends its collection, world and (render=True) render
+settings under a root Empty; its marks and cameras come with it. Their build() raises FileNotFoundError naming the make
+command while a room is not made yet.
 """
 
 from __future__ import annotations
@@ -76,6 +82,13 @@ register('places.town', 'eidoblend.sets.town', film='PLACES',
          about='a concrete-frame town on a street grid, its edge thinning out into the plain; damage as an option')
 register('places.desert', 'eidoblend.sets.desert', film='PLACES',
          about='the desert round a town: a basin floor, braided wadis, star dunes, an escarpment, ranges to 30 km')
+# the SAME SEED film's rooms: made in Blender for that film (no WebGPU original), each made once by its chain
+for _n, _about in (
+        ('sealed_room', 'a sealed room: painted block, plated windows, a door with no handle, a welded steel bench, its own light'),
+        ('kitchen', 'the kitchen at noon: cupboards, a cooker, a refrigerator, a farmhouse table with the homework on it, the basil'),
+        ('lab', 'a lab full of light: a ribbon of windows, a bench, a whiteboard, LED panels, a task chair and the houseplants'),
+        ('desk', 'the room at 2 a.m.: a desk with a lit screen, a guitar, shelves of books, the desk lamp, the square at night')):
+    register(f'same_seed.{_n}', f'eidoblend.sets.same_seed.{_n}', film='SAME SEED', about=_about)
 del _n, _src, _about
 
 
@@ -144,11 +157,12 @@ def build(name, ctx=None, **kw):
     return fn(**kw)
 
 
-FILMS = ('daisy', 'unknown_force')
+FILMS = ('daisy', 'unknown_force', 'same_seed')
 
 
 def __getattr__(name):
-    """sets.daisy, sets.unknown_force: the films' packages, imported on first access (neither imports a set)."""
+    """sets.daisy, sets.unknown_force, sets.same_seed: the films' packages, imported on first access (none imports a
+    set)."""
     if name in FILMS:
         return importlib.import_module(f'{__name__}.{name}')
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

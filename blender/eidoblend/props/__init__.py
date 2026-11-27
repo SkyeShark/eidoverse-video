@@ -26,9 +26,12 @@ REGISTRY = {name: f'{__name__}.voice_machines.{name}' for name in VOICE_MACHINES
 REGISTRY['tandem'] = f'{__name__}.tandem'
 REGISTRY['carbine'] = f'{__name__}.carbine'
 REGISTRY['helicopter'] = f'{__name__}.helicopter'
+# the SAME SEED rooms' houseplants: props.build('houseplants', species='monstera', location=(x, y, z)) grows one (a rubber
+# plant, a Monstera on its coir pole, a corn plant, the basil in its pot, the watering can)
+REGISTRY['houseplants'] = f'{__name__}.houseplants'
 
 NAMES = list(REGISTRY)
-SUBPACKAGES = ('voice_machines', 'tandem', 'hardsurface', 'carbine', 'helicopter')
+SUBPACKAGES = ('voice_machines', 'tandem', 'hardsurface', 'carbine', 'helicopter', 'houseplants')
 
 
 def load(name: str):
@@ -67,8 +70,8 @@ def build(prop: str, opts: dict = None, /, **kw):
 
 
 def __getattr__(name):
-    """props.voice_machines, props.tandem, props.hardsurface, props.carbine, props.helicopter, imported on first
-    access."""
+    """props.voice_machines, props.tandem, props.hardsurface, props.carbine, props.helicopter, props.houseplants,
+    imported on first access."""
     if name in SUBPACKAGES:
         return importlib.import_module(f'{__name__}.{name}')
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

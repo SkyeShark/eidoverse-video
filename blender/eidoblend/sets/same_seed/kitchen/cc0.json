@@ -1,0 +1,8 @@
+{
+ "about": "the kitchen's CC0 library, fetched by ID on first use into eidoverse/assets/cache/ (Poly Haven and ambientCG; every one CC0); its basil reads eidoblend/props/houseplants/cc0.json; Marble016 is the composition book's cover (prints.py)",
+ "textures": ["PaintedPlaster017_2k", "floor_tiles_08_2k", "coated_pine_2k", "Paint004_2k", "Granite005A_2k", "Metal009_2k", "Fingerprints002_2k",
+              "Fingerprints008_2k", "Rubber004_2k", "Plastic013A_2k", "gingham_check_2k", "Fabric062_2k", "Paper001_2k", "Fabric039_1k", "Marble016_2k"],
+ "models": [{"id": "wooden_bowl_01", "res": "1k"}, {"id": "food_apple_01", "res": "1k"}, {"id": "food_pears_asian_01", "res": "1k"},
+            {"id": "bananas", "res": "1k"}, {"id": "wooden_cutting_board", "res": "1k"}],
+ "hdris": [{"id": "suburban_garden", "res": "4k"}, {"id": "suburban_garden", "res": "1k"}]
+}

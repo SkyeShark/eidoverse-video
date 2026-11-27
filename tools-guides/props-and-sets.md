@@ -35,6 +35,8 @@ it](#a-town-and-the-desert-round-it)).
 | An 1896-pattern tandem, a rider rig, a teapot stoker | `eidoblend.props.tandem` | [the tandem](#the-1896-tandem) | [`props/tandem.js`](../eidoverse/props/tandem.js) | [`models/tandem_1896/`](../eidoverse/assets/models/tandem_1896/README.md) |
 | An M4A1-pattern carbine: a 499 k-triangle high, a 21 k low on GPU bakes, one layered material | `eidoblend.props.carbine` | [the carbine](#the-carbine) | none (native) | built in code; its look fetches 6 CC0 sets |
 | A UH-60-pattern helicopter, its cabin open, its rotors keyed | `eidoblend.props.helicopter` | [the helicopter](#the-helicopter) | none (native) | built in code, every picture drawn |
+| The SAME SEED rooms: a sealed room, a kitchen at noon, a lab full of light, a room at 2 a.m. | `eidoblend.sets.same_seed.<room>` | [the SAME SEED rooms](#the-same-seed-rooms) | none (native) | built in code; CC0 sets, Poly Haven models and HDRIs by ID in each room's `cc0.json` |
+| The houseplants: a rubber plant, a Monstera on its coir pole, a corn plant, the basil, a watering can | `eidoblend.props.houseplants` | [the houseplants](#the-houseplants) | none (native) | grown in code; its look fetches 7 CC0 sets |
 
 Every asset folder has a README and a SOURCES file (licences, provenance);
 the UNKNOWN FORCE sets list theirs in
@@ -2536,6 +2538,148 @@ out (`seat_door_l`, its pan 0.445 m above the floor at x 0.12, y -0.70): a
 performer sits there. `cli.py stills` renders the named views of
 `cli.VIEWS` in daylight (a sun and a pale sky).
 
+## The SAME SEED rooms
+
+`eidoblend.sets.same_seed` holds the four rooms of the SAME SEED film. They
+were made in Blender for that film, so they have no WebGPU original (their
+registry `source` is ""); here each is a free, reusable room. They are built
+the way a game asset is: every part a closed high made from how the thing is
+made, the parts a lens comes close to drawn again as lows and baked, every
+surface one layered material over CC0 photographic sets at their real size,
+Poly Haven pieces where Poly Haven has them, and each room's own light with a
+volume probe baked over it.
+
+| Room | Package | Its light | Its cameras (`CAMS`) |
+| --- | --- | --- | --- |
+| A sealed room in an old government building, 5.0 x 4.6 x 2.6 m: painted block, two windows plated shut, a door with no handle, a welded steel bench | `sets.same_seed.sealed_room` | one fluorescent batten; the world black | wide, bench_right, bench_left, corner, stool, bench_close, door, window_plate |
+| The kitchen at noon, 6.0 x 5.0 m under a 9 ft ceiling: cupboards, a cooker, a refrigerator, a farmhouse table with a child's homework on it, the basil on the sill | `sets.same_seed.kitchen` | a winter sun through the window, the sky at the glass, Poly Haven's suburban_garden outside | wide, table, window and eight close ones |
+| A lab full of light, 8.0 x 5.0 x 2.8 m: a ribbon of windows, a bench, a whiteboard, a task chair and [the houseplants](#the-houseplants) | `sets.same_seed.lab` | a sun through the windows, Poly Haven's pretoria_gardens, eight LED panels | wide, wide_left, window, bench, plants_left, monstera, corn_plant, whiteboard |
+| The room at 2 a.m., 6.0 x 5.0 x 2.8 m: a desk with a lit screen, a guitar, shelves of books, somebody's song being written | `sets.same_seed.desk` | the screen's glow, the desk lamp's pool, a little moonlight, Poly Haven's hansaplatz at night | wide, left, window, right and six close ones |
+
+Each room's space: x across (its cameras look along +y), y to the back wall,
+z up from the floor, metres; the front wall stays in the file, hidden from
+the camera only, so it still closes the room for light, shadow and
+reflection.
+
+### Making a room
+
+A room is made once, by its chain, into one `.blend`; then it is appended
+wherever it is wanted.
+
+```bash
+python blender/eidoblend/sets/same_seed/make.py --list                 # the rooms and their steps
+python blender/eidoblend/sets/same_seed/make.py kitchen                # -> work/sets/same_seed/kitchen/kitchen.blend
+python blender/eidoblend/sets/same_seed/make.py desk --stills --res 1920x1080
+python blender/eidoblend/sets/same_seed/make.py lab --from look --sun 24 --world 3.5     # the look again, other light
+```
+
+| Step | What it does | It writes (in `--out`, default `work/sets/same_seed/<room>/`) |
+| --- | --- | --- |
+| high | every part as built (Blender) | `<room>_high.blend` |
+| lows | the close parts' lows (each its own construction without the bevel), their UVs, the bake's inputs (Blender) | `<room>_lows.blend`, `bake/` |
+| bake | every ray on the GPU: `blender/tools/gpu_bake.py` (warp-lang; on the CPU without CUDA) | `bake/<atlas>_normal.png`, `_masks_a.png`, `_masks_b.png` |
+| prints | the room's drawn pictures (plain Python with Pillow, in the repository's OFL fonts) | `prints/` |
+| look | CC0 sets and models, the layered materials, the light, the probes (Blender) | `<room>.blend` |
+| stills | (`--stills`) its cameras at its own render settings | `stills/<room>_<cam>.png` |
+
+Each step is its own process, run through
+`eidoblend.props.hardsurface.chain` (EIDO_GPU_WRAP queues every one; exit 75
+means busy). Without warp-lang make.py stops before the bake and says so
+(exit 3). The kitchen is the exception: it bakes in Blender's own Cycles
+inside its lows step, because its look's wear thresholds are set on those
+maps (about 13 minutes at 4096 on a desktop GPU; `--size 1024 --quick` makes
+a preview in a few minutes). The whole chain of each of the other rooms takes
+two to three minutes. A room's look options are make.py's extra
+`--<option> value` pairs (each room's `LOOK` lists them with their defaults:
+the kitchen's `--sun --sun-el --sun-az --sky --fill --garden --garden-rot
+--ambient`, the desk room's `--lamp --screen --screen-w --moon --world --night
+--night-u --night-v --moon-el --moon-az --lamp-x --lamp-y --world-rot`, the
+lab's `--world --sun --panel --sun-el --sun-az --screen --clamp`, the sealed
+room's `--tube --watts --wallfill`).
+
+The CC0 IDs are in each room's `cc0.json` (textures, Poly Haven models,
+HDRIs), fetched into the shared library on first use
+(`eidoverse/assets/cache/`, or `EIDO_ASSET_CACHE`; `EIDO_NO_FETCH=1` turns a
+missing ID into an error naming its fetch command). Each Poly Haven model
+keeps its licence file beside it there, and each HDRI a `SOURCE.txt`. Nothing
+of them is in the repository.
+
+### A room in a scene of your own
+
+```python
+from eidoblend import sets
+room = sets.build('same_seed.kitchen', ctx, render=True)   # its collection, world and render settings appended
+room.group.location = (40.0, 0.0, 0.0)                     # the root Empty carries the whole room
+room.marks['table_top']                                    # {'pos': (0.9, -0.45, 0.74), 'size': (1.5, 0.9), 'about': ...}
+room.mark('stand')                                         # a mark in world space, the root applied
+cam = room.make_camera('wide')                             # one of room.cams, parented to the root
+room.parts, room.lights, room.probes                       # its meshes, lights and light probes
+room.dispose()
+```
+
+`build(..., blend=path)` appends a room made elsewhere (make.py `--out`);
+`world=False` keeps your scene's world; `render=True` applies the room's
+render settings (`RENDER` in its package, through `same_seed.look.eevee`).
+While a room is not made yet, build() raises FileNotFoundError naming the
+make command. The marks are where a body stands (`stand`, facing -y, with
+nothing between it and the room's cameras) and where things are set down:
+the sealed room's `bench_top` and `stool_seat`, the kitchen's `table_top`,
+`homework`, `child_chair` and `basil`, the lab's `bench_top`, `chair` and its
+three plants, the desk room's `desk_top`, `page`, `screen` and `chair`.
+
+The rooms' render settings are their own and travel in their packages: the
+sealed room EEVEE with screen-traced rays and Fast GI at 16 samples (its
+bounce is lamps, no probe); the lab and the desk room Fast GI as ambient
+occlusion only at 64 samples (the baked probe carries the bounce; at 16
+samples with GI their white walls grain), the shadow pool at 1024 MB; the
+kitchen 96 samples, Fast GI to 1.5 m, AgX at exposure +0.3, leaving what it
+does not name at Blender's own.
+
+What the modules hold (millimetres in every builder's tables, metres in the
+scene): the shared `same_seed.look` (the CC0 library and layered material
+helpers of `eidoblend.materials.photo`, the GPU bake's maps on a low, the
+render settings, cameras, stills, the probe bake), `same_seed.bake` (the lows'
+UVs, true-size texel weighting and packing, and the atlas export for the GPU
+baker through the hard-surface kit's exporter), `same_seed.room` (the append
+and the Room), `cli.py` and `make.py`; per room `high` (the build step),
+`lows`, `prints`, `look` and its builders (the kitchen's `kit` with the groups
+`shell`, `cabinets`, `fridge`, `table`, `things`; the desk room's `kit` with
+`shell`, `furniture`, `computer`, `guitar`, `things`, `models`, `books`; the
+lab's `kit`, `shell`, `furniture`; the sealed room's `room` and `bench`).
+
+## The houseplants
+
+`eidoblend.props.houseplants` is the lab's and the kitchen's plants as props
+of their own, each grown as it grows and given its look: a rubber plant
+(Ficus elastica) in a glazed stoneware pot, a Monstera deliciosa on its coir
+pole in terracotta, a corn plant (Dracaena fragrans 'Massangeana') in a
+fibre-clay planter on expanded-clay pebbles, the kitchen's pot of sweet
+basil, and a yellow watering can.
+
+```python
+from eidoblend import props
+from eidoblend.props import houseplants
+plant = props.build('houseplants', species='monstera', location=(1.0, 2.0, 0.0), ctx=ctx)
+plant.group, plant.parts                       # its root Empty (move and turn it), its meshes
+three = houseplants.build_group([('rubber_plant', (-0.7, 0, 0)), ('monstera', (0, 0, 0)), ('corn_plant', (0.7, 0, 0))])
+plant.dispose()
+```
+
+`build(species, location, rotation_z, ctx, scene, look=True, seed=11)` grows
+one in a collection of its own, faces it -y and gives it its look
+(`look=False` leaves it in clay); `build_group` grows several in one garden,
+so every blade clears what was grown before it (the lab's three stand that
+way). Measured, the rubber plant stands 1.6 m in a 0.32 m pot, the Monstera
+1.2 m on its pole in a 0.3 m pot, the corn plant 1.85 m in a 0.4 m planter,
+the basil 0.25 m in a 9 cm pot; the watering can is 0.41 m long. The leaves
+are thin solids carrying their own data (`leafdata`, `leafq`) for their
+material: each species' green, the newest leaves paler or bronzed, the
+veins where the species has them, a waxy coat, a paler underside, light
+through the blade. Nothing moves (no wind). Their CC0 sets are in
+`props/houseplants/cc0.json`, fetched on first use. The modules: `kit` (what
+grows and what is moulded), `plants` (the three plants, the watering can,
+the garden), `basil`, `look`.
+
 ## A library GLB on its own
 
 For a static piece of a set (a crate, a lamp, a tent), import its GLB and
@@ -2839,6 +2983,31 @@ into the flight over the town), the scrub, and two stills
 `SEEDTHREE_DIR` to a SeedThree checkout (else the town's yard trees are its
 own).
 
+### The SAME SEED rooms' and the houseplants' tests
+
+```bash
+python blender/tests/sets_same_seed/test_rooms.py                       # the four rooms made from nothing, checked, two stills each
+python blender/tests/sets_same_seed/test_rooms.py --rooms desk --no-render
+bash run_blender.sh blender/tests/sets_same_seed/check_room.py kitchen work/sets/same_seed/kitchen   # a made room, checked
+bash run_blender.sh blender/tests/sets_same_seed/test_houseplants.py [--no-render]
+```
+
+`test_rooms.py` runs each room's whole chain into its `out/` folder (the
+kitchen's bake at 1024 with a tenth of the samples; `--full` for its own;
+about ten minutes for the four on a desktop GPU), then `check_room.py`
+appends the delivered file through `sets.build` and checks it: its world and
+render settings arrive, it has its lights (and both probes where its look
+bakes them), no mesh is left in a build clay, every low has its atlas UV and
+baked maps, every picture it reads is on disk, its marks and cameras' aims
+lie in the room, the root carries it, `dispose()` removes it. Then two small
+stills from its own cameras. A room whose GPU bake cannot run is a SKIP.
+With `EIDO_SAME_SEED_FILM` pointing at the film's own set folder (outside the
+repository) it also renders each room's wide camera at 1920 x 1080 and
+measures it against the film's frame from that lens. `test_houseplants.py`
+builds every species alone (closed, dressed, its measured size, standing on
+its floor, carried by its root) and the lab's three together (no leaf
+through another), then two stills.
+
 ## Not yet ported
 
 Every set's and prop's public API is ported. What differs from the WebGPU
@@ -2963,3 +3132,43 @@ pieces, and what was left out:
   race.js's `CUES` and `suggest(t)`, bin.js's `BRIDGE`, CORRIDOR_NEWS.md's
   suggested cues. Every moving part they timed keeps its own controls, and
   `animate` / `make_cameras` take your clock and your cut.
+
+### The SAME SEED rooms and the houseplants: what is known to be wrong
+
+The rooms come out as the film has them (all sixteen of the film's frames of
+the four rooms, rendered again from the made rooms at 1920 x 1080, within a
+mean absolute luma difference of 0.002), so the film's own faults come with
+them:
+
+- **The sealed room.** The door is a clean, even blue-grey slab; the plates
+  are smooth painted sheet with no mill scale under the paint, their runs dark
+  brown; the bench top's mottle reads milky at grazing light; the welds
+  barely show in its own light; the block's relief is a scan held down by its
+  strength.
+- **The kitchen.** The basil reads pale and silvery (gloss and translucency),
+  not basil green; the photographs held on the refrigerator are near black
+  (the garden picture is stored dark); the pine table is a saturated orange
+  with a sky sheen on its near half from the table camera; the cupboards'
+  paint is evenly clean at a distance; the chairs, frames, worktop and walls
+  carry photo sets and position masks but no bake; its volume probe is baked
+  at Blender's default 4 x 4 x 4 (the film's settings named the probe's
+  properties as an older Blender did, so they never took; `probe_res` sets
+  it).
+- **The lab.** The radiators read beige-grey, not white enamel; the blinds
+  are a flat two-tone panel with a dotted sparkle along one hem; the corn
+  plant is dark behind its low blind, its bands weak and its canes too dark;
+  the coir pole reads as a dark smooth stick; the rubber plant's new sheath is
+  not red; the pedestal is a heavy grey; the view out is soft (a 4k HDRI); the
+  keyboard has no legends. The bench rails' joints leave 8 open edges, and a
+  few leaf blades of the rubber plant (6 edges) and the Monstera (2) are open.
+- **The room at 2 a.m.** The desk lamp spills a white wedge past the desk's
+  front edge onto the rug; the ceiling globe reads faintly lit; the curtains
+  read maroon in the warm bounce; the headphone cups read silver under the
+  lamp; the book cloths are pastel in a plain light; the keycaps have no
+  legends; the night outside is soft behind a head at 60 mm and a lit tree
+  stands in the right pane; the guitar and the door wall are near black at
+  this hour; the chair is a dining chair. Blender's exact boolean gives the
+  keyboard's case and the radiator's front panel a few vertices more or fewer
+  from one build to the next.
+- **The houseplants.** A few blade edges of the rubber plant's leaves are
+  open (6 edges), so its leaves are not quite closed solids.

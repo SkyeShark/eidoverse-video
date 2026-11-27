@@ -1,0 +1,7 @@
+{
+ "about": "the lab's CC0 library, fetched by ID on first use into eidoverse/assets/cache/ (Poly Haven and ambientCG; every one CC0); its houseplants read eidoblend/props/houseplants/cc0.json",
+ "textures": ["PaintedPlaster017_2k", "Plaster001_2k", "Granite005A_2k", "linoleum_brown_2k", "Paint004_2k", "Plastic013A_2k", "Rubber004_2k",
+              "Metal009_2k", "Fingerprints002_2k", "Fingerprints008_2k", "Fabric039_1k", "Fabric062_2k", "Fabric034_2k", "Paper001_2k", "Cardboard002_1k"],
+ "models": [{"id": "wall_clock", "res": "1k"}, {"id": "stationery_supplies", "res": "1k"}, {"id": "office_notepads", "res": "1k"}],
+ "hdris": [{"id": "pretoria_gardens", "res": "4k"}]
+}

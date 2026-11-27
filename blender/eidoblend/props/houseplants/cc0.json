@@ -1,0 +1,6 @@
+{
+ "about": "the houseplants' CC0 library, fetched by ID on first use into eidoverse/assets/cache/ (ambientCG and Poly Haven; every one CC0)",
+ "textures": ["Clay005_2k", "Ground048_2k", "Granite005A_2k", "Fingerprints002_2k", "Concrete017_1k", "Plastic013A_2k", "floor_tiles_08_2k"],
+ "models": [],
+ "hdris": []
+}
