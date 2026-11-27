@@ -20,6 +20,7 @@ and whole enclosed sets.
 | The funeral (a bridge in fog and a warehouse vigil) | [`eidoverse/sets/funeral.js`](../eidoverse/sets/funeral.js) + [`funeral/bridge.js`](../eidoverse/sets/funeral/bridge.js) | [`sets/funeral/`](../eidoverse/assets/sets/funeral/README.md) + `models/funeral_*.glb` |
 | The ocean of faces (a headland at night) | [`eidoverse/sets/ocean.js`](../eidoverse/sets/ocean.js) + [`ocean/*.js`](../eidoverse/sets/ocean/) | [`sets/ocean/`](../eidoverse/assets/sets/ocean/README.md) + `models/ocean_*.glb` |
 | UNKNOWN FORCE: a night megacity round a sunken well, a quiet room, a showroom, a gold corridor, a data centre, a race on an elevated highway and a canyon of paper | [`eidoverse/sets/unknown_force/`](../eidoverse/sets/unknown_force/README.md) (14 modules) | none of its own ([sources](../eidoverse/sets/unknown_force/SOURCES.md)) |
+| SAME SEED: a sealed room, a kitchen at noon, a lab full of light and a room at 2 a.m., made in Blender ([below](#the-same-seed-rooms)) | [`eidoverse/sets/same_seed.js`](../eidoverse/sets/same_seed.js) + [`same_seed/*.js`](../eidoverse/sets/same_seed/) | [`sets/same_seed/`](../eidoverse/assets/sets/same_seed/README.md) + `models/same_seed_*.glb` |
 
 Every asset folder has a README, and a SOURCES file recording licences and
 provenance. A sibling `<name>_src/` folder holds the Blender scripts that
@@ -564,6 +565,121 @@ They were staged at 92.90 BPM for UNKNOWN FORCE, and their docs give the sung
 times as cues. Every `update` key is free, so drive them on your own clock.
 Each doc gives its set's measured cost and method; with the post pass on at
 1080p, the GPU-timed sets ran 8–12 ms per frame.
+
+## The SAME SEED rooms
+
+The four rooms of the SAME SEED music video were made in Blender, on the Blender
+edition (branch `blender`, `eidoblend.sets.same_seed`), and are brought here as
+they look there. Each is a whole interior with its own light; nothing else in
+the scene is needed to light it.
+
+| Room | What it is | Its cameras (`room.cams`) |
+| --- | --- | --- |
+| `sealed_room` | A sealed room in an old government building, 5.0 × 4.6 × 2.6 m: painted block, plated windows, a door with no handle, a welded steel bench, a stool, a camera in the corner, one fluorescent batten | `wide`, `bench_right`, `bench_left`, `corner`, `stool`, `bench_close`, `door`, `window_plate` |
+| `kitchen` | A kitchen at noon: cupboards, a cooker, a fridge, a farmhouse table with homework, basil on the sill, a winter sun and a garden through the window | `wide`, `table`, `window`, `table_homework`, `cupboard_door_knob`, `fridge_papers`, `sink_tap_sun`, `basil_on_the_sill`, `chair_and_cushion`, `cooker_and_kettle`, `window_and_clock` |
+| `lab` | A lab full of light: a ribbon of windows on a park, a bench, a whiteboard, eight LED panels, a task chair and three houseplants (a rubber plant, a Monstera, a corn plant) | `wide`, `wide_left`, `window`, `bench`, `plants_left`, `monstera`, `corn_plant`, `whiteboard` |
+| `desk` | The room at 2 a.m.: a desk with a lit screen, the desk lamp's pool, a guitar, shelves of books, the moon and the square at night outside | `wide`, `left`, `window`, `right`, `desk_things`, `guitar`, `window_radiator`, `door_switch`, `shelves_books`, `pc_chair_rug` |
+
+```js
+// in setup(), after renderer.init():
+globalThis._bloomParams = { strength: 0 };            // the rooms were lit for a render without bloom
+const SS = await import(new URL('sets/same_seed.js', EIDOVERSE_DIR).href);
+const room = await SS.build('lab', { THREE });        // SS.ROOMS lists the four
+scene.add(room.group);                                // metres, +Y up; move or turn room.group to place it
+room.applyTo(scene, renderer);                        // its world behind the windows, Blender's AgX at its exposure
+room.camera('wide', camera);                          // position, aim and field of view for the camera's aspect
+const m = room.marks.stand;                           // { position (group-local Vector3), yaw, about }
+```
+
+- **`build(name, { THREE, shadows })`** returns `{ name, group, parts, lights,
+  cams, marks, camera, applyTo, dispose, lighting, isCameraRay, json, bounds }`.
+  It takes 6–12 s; the first build of a room also fetches its CC0 sets, Poly
+  Haven models and HDRI into the
+  [shared library](assets.md#the-shared-library--library-code-names-ids-never-commits-them)
+  (about 650 MB for all four rooms).
+- **`marks`** are where a body stands and where things are set down: a
+  group-local `position`, a `yaw` in radians about +Y where it has one (0 faces
+  +Z, toward the wide cameras), a `size` for a surface and an `about`.
+- **`cams`** are the film's lenses, `{ position, target, lens, sensor }` (mm,
+  Blender's 36 mm sensor across the wider side); `camera(name, cam)` sets a
+  `PerspectiveCamera`'s place, aim and vertical field of view for its aspect.
+- **`applyTo(scene, renderer)`** sets `scene.backgroundNode` from the room's
+  world (the desk room's night square is a backdrop seen through the glass; its
+  world is black to the lens), `scene.environment` to the room's reflection
+  panorama when the scene has none (for what you add to the room), and AgX as
+  Blender 5.2 draws it at the room's exposure (the kitchen's is +0.3):
+  `SS.blenderAgX(THREE)`, set as the renderer's `CustomToneMapping`. three's
+  own `AgXToneMapping` follows Blender 4.0's and shows the mid-tones lighter (a
+  linear grey of 0.1 is 100 of 255 there, 87 in Blender 5.2); this one is a fit
+  to Blender's view transform, within 4 of 255 on greys and on colours up to
+  half saturation, greys kept grey.
+- **Light.** Each Blender light becomes a three.js light: a sun a
+  `DirectionalLight` (W/m² as its intensity, a shadow over the room), an area
+  light a `RectAreaLight` (P / (π w h)) with a soft cube shadow from its centre
+  (rooms with more than three shadowed area lights, the lab's panels, keep their
+  light and drop the shadows: each shadow map is a texture every material
+  samples, and WebGPU allows 16), a spot a `SpotLight` and a point a
+  `PointLight` (P / 4π). Every one ends at the reach EEVEE gives it (where its
+  power falls under the light threshold), with three's own window, so the
+  rooms' fill lights reach only as far as they did in Blender. The room's own
+  materials take their environment from `room.lighting`: the diffuse bounce of
+  the Blender room's volume probe, as a grid of L1 spherical harmonics in three
+  3D textures (Cycles' bounce at each cell, the world's light through the
+  windows included, the lamps' own light left to the lights), and the
+  reflection probe's panorama for reflections, darkened where the grid has less
+  light than the panorama's centre. `room.lighting.uniforms.bounce` and
+  `.reflect` scale the two (1 by default).
+- **Materials.** The parts with UV `atlas` (the lows) carry their look baked by
+  Cycles at the atlas's size: base colour, ORM (the bake's occlusion is in the
+  ORM's red for other viewers; this module leaves it out, as the Blender look
+  already darkened its creases with it) and a tangent-space normal. Everything
+  else (walls, floors, trim, the small things) keeps its Blender material as a
+  node graph in `materials.json`, rebuilt in TSL by `same_seed/nodes.js` over
+  the CC0 photographs at their real size: the masks from the point and the
+  normal in the object's own space, Blender's noise (`same_seed/noise.js`, the
+  same hash and gradients, so a stain falls where it fell in Blender), box
+  projections, normal maps and bumps. The Poly Haven models load by ID as they
+  ship, at the Blender room's matrices; a lamp the Blender look lit or put out
+  keeps that emission.
+- **Background.** `room.isCameraRay` is the Light Path's "Is Camera Ray" (1);
+  set it to 0 to see a world as the room's light saw it.
+- `dispose()` removes the group and frees the room's materials, textures and
+  rest geometry.
+
+`same_seed/nodes.js` is not tied to these rooms: `makeGraphs(THREE, { image,
+isCameraRay })` rebuilds any graph `export_room.py` writes (Math, Vector Math,
+Map Range, Mix, Hue/Saturation/Value, RGB to BW, Separate/Combine XYZ and
+Color, Mapping, Texture Coordinate, Geometry, UV Map, Attribute, Image and
+Environment Textures, Noise, White Noise and Voronoi F1, Normal Map, Bump,
+Fresnel, Layer Weight, Color Ramp, curves, Vector Transform, Light Path, and
+the Principled, Emission, Background, Diffuse, Glossy, Glass, Translucent and
+Transparent shaders mixed and added). A node it does not know logs once and
+reads as 0.
+
+To rebuild the files from the Blender edition, see
+[`same_seed_src/`](../eidoverse/assets/sets/same_seed_src/README.md). The
+worked example is [`eidoverse/examples/same_seed_rooms/`](../eidoverse/examples/same_seed_rooms/README.md),
+each room through its wide camera.
+
+**How they compare with the Blender stills** (the wide camera at 960 × 540: the
+Blender edition's EEVEE still; the same `.blend` path-traced by Cycles, 64
+samples, denoised, to show where EEVEE's probes and this grid part; and this
+example with the default post chain and no bloom). Mean luma, and the region
+values in levels of 255:
+
+| Room | EEVEE | Cycles | Here | Where they differ |
+| --- | ---: | ---: | ---: | --- |
+| `sealed_room` | 0.247 | 0.368 | 0.242 | The room has no volume probe, so here, as in EEVEE, there is no baked bounce (Cycles' closed room is half again brighter). The bench's shadow on the floor is a darker, squarer pool with a soft rim: one cube shadow from the batten's centre, where EEVEE's comes from its whole length. The top of the back wall is darker than EEVEE's, which lights it off the washed ceiling through its screen-traced GI (with the batten alone the two match), and the conduit by the vent throws a dark wedge EEVEE's area shadow washes out. |
+| `kitchen` | 0.485 | 0.457 | 0.433 | EEVEE's volume probe lights the faces under and beside the table (its apron, the chairs) and the cupboard fronts as if nothing stood over them: the apron is 138 in EEVEE, 54 in Cycles and 61 here, the upper fronts 154, 129 and 126. The grid holds Cycles' bounce, so these follow the path-traced still and read darker than the EEVEE one; the front right of the floor is darker than both (52 against 80). `room.lighting.uniforms.bounce = 1.6` brings the fronts to EEVEE's (148) and the floor's left past it (127 against 101). |
+| `lab` | 0.580 | 0.640 | 0.621 | The ceiling, the desk and the back wall follow Cycles, brighter than EEVEE's (the ceiling 176 here, 177 Cycles, 139 EEVEE); the floor is darker than both (138 at the front against 152 and 167) and neutral grey where EEVEE's takes the sky's blue. Along the window heads the rubber gaskets and the beads meet in a serrated line (two faces at one depth, which EEVEE draws cleanly; it shows with the post chain off too, and will shimmer in motion). |
+| `desk` | 0.082 | 0.095 | 0.083 | The wall under the window and the radiator take more of the desk lamp's warm bounce; the window's white frame reads darker and its glass a little hazier with the room's reflection. |
+
+Known limits: a Translucent BSDF (the leaves, the paper) is taken as a diffuse
+one, so no light comes through a leaf; the reflections come from one panorama
+with no parallax; an area light's shadow is cast from its centre; three's
+renderer has no screen-space GI, so the bounce is only as fine as the grid's
+cells; the bump's slope is read from screen derivatives, a little softer on the
+finest grain than Blender's.
 
 ## Costs
 

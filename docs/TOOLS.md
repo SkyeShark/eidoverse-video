@@ -37,6 +37,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/assets/sets/corner_src/](../eidoverse/assets/sets/corner_src/README.md) | Asset source: Blender/PIL scripts that built the corner set | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/assets/sets/funeral_src/](../eidoverse/assets/sets/funeral_src/README.md) | Asset source: Blender scripts that built the funeral set | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/assets/sets/ocean_src/](../eidoverse/assets/sets/ocean_src/README.md) | Asset source: Blender scripts that built the ocean set | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/assets/sets/same_seed_src/](../eidoverse/assets/sets/same_seed_src/README.md) | Asset source: the Blender export of the SAME SEED rooms made by the Blender edition (`export_room.py`: lows baked, the rest's node graphs, lights, bounce grid, reflections; `glb.py`) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/assets/vrms/claude_suit_wardrobe_src/](../eidoverse/assets/vrms/claude_suit_wardrobe_src/README.md) | Asset source: packed .blend, garment recipes, the petal-ring pivot tool, and the TuTa build (`build_tuta.py`, which exports the VRM), badge spec and painter | [blender](../tools-guides/blender.md) |
 | [eidoverse/asteroid_moon.js](../eidoverse/asteroid_moon.js) | Explicit facade/package component | [sky-weather](../tools-guides/sky-weather.md) |
 | [eidoverse/audit_core.js](../eidoverse/audit_core.js) | System support; see guide for entry point | [render-review](../tools-guides/render-review.md) |
@@ -104,6 +105,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/houseplants/scene.js](../eidoverse/examples/houseplants/scene.js) | Scene example: the five houseplants in the studio light | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/examples/motion_vectors/scene.js](../eidoverse/examples/motion_vectors/scene.js) | Scene example: the runner's motion output (`"motionVectors"`), checked by `check.py` (files, convention, an unchanged picture) | [postprocessing](../tools-guides/postprocessing.md) |
 | [eidoverse/examples/obstacle_course.js](../eidoverse/examples/obstacle_course.js) | Scene example/template | [development](../tools-guides/development.md) |
+| [eidoverse/examples/same_seed_rooms/scene.js](../eidoverse/examples/same_seed_rooms/scene.js) | Scene example: a SAME SEED room through one of its lenses (one config per room) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/examples/robotics/assembly.scene.js](../eidoverse/examples/robotics/assembly.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/mantis.scene.js](../eidoverse/examples/robotics/mantis.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
 | [eidoverse/examples/robotics/manufacturing.scene.js](../eidoverse/examples/robotics/manufacturing.scene.js) | Scene example/template | [development](../tools-guides/development.md) |
@@ -218,6 +220,10 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/sets/ocean/perform.js](../eidoverse/sets/ocean/perform.js) | Ocean set submodule | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/ocean/sea.js](../eidoverse/sets/ocean/sea.js) | Ocean set submodule | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/ocean/util.js](../eidoverse/sets/ocean/util.js) | Ocean set submodule | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/same_seed.js](../eidoverse/sets/same_seed.js) | Dynamic ESM film set: the four SAME SEED rooms, made in Blender (`build(room, { THREE })`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/same_seed/light.js](../eidoverse/sets/same_seed/light.js) | SAME SEED submodule: a room's Blender lights as three.js lights (EEVEE's reach, area-light shadows), its bounce grid and reflections | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/same_seed/nodes.js](../eidoverse/sets/same_seed/nodes.js) | SAME SEED submodule: a Blender shader node graph rebuilt as a TSL material (`makeGraphs`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [eidoverse/sets/same_seed/noise.js](../eidoverse/sets/same_seed/noise.js) | SAME SEED submodule: Blender's Noise, White Noise and Voronoi F1 textures in TSL | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/unknown_force/bin.js](../eidoverse/sets/unknown_force/bin.js) | Dynamic ESM film set (UNKNOWN FORCE) | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/unknown_force/bin_pages.js](../eidoverse/sets/unknown_force/bin_pages.js) | Bin submodule: the page atlas | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [eidoverse/sets/unknown_force/city.js](../eidoverse/sets/unknown_force/city.js) | Dynamic ESM film set (UNKNOWN FORCE); builds the hole too | [props-and-sets](../tools-guides/props-and-sets.md) |
@@ -292,7 +298,7 @@ to distinguish missing scene APIs from internal implementation functions.
 | [eidoverse/examples/robotics/rotary_metal.scene.js](../eidoverse/examples/robotics/rotary_metal.scene.js) | Aluminum rotary cutting at physical speed followed by a time-lapse finish | [robotics](../tools-guides/robotics.md) |
 | [eidoverse/examples/robotics/relief.scene.js](../eidoverse/examples/robotics/relief.scene.js) | Renderable close study of ball-nose roughing and finishing | [robotics](../tools-guides/robotics.md) |
 
-**248 first-party source/entry-point files, plus 9 asset `_src` folders; 33 guides; 33 post effects.**
+**253 first-party source/entry-point files, plus 10 asset `_src` folders; 33 guides; 33 post effects.**
 This is documentation coverage, not a claim that every API was executed in
 this audit or a count of robot parts. The inspector HTML entry point is included.
 
@@ -320,8 +326,10 @@ this audit or a count of robot parts. The inspector HTML entry point is included
   [performance clips source](../eidoverse/assets/animations/performance_uf_src/README.md).
 - Props and sets: [voice machines](../eidoverse/assets/models/voice_machines/README.md),
   [tandem](../eidoverse/assets/models/tandem_1896/README.md),
-  [corner](../eidoverse/assets/sets/corner/README.md), [funeral](../eidoverse/assets/sets/funeral/README.md) and
-  [ocean](../eidoverse/assets/sets/ocean/README.md), each with a SOURCES file beside it.
+  [corner](../eidoverse/assets/sets/corner/README.md), [funeral](../eidoverse/assets/sets/funeral/README.md),
+  [ocean](../eidoverse/assets/sets/ocean/README.md) and the
+  [SAME SEED rooms](../eidoverse/assets/sets/same_seed/README.md), each with a SOURCES file beside it;
+  the [SAME SEED rooms example](../eidoverse/examples/same_seed_rooms/README.md).
 
 ## Scope and exclusions
 
