@@ -4280,6 +4280,13 @@ room.camera('wide', camera);                          // room.cams: the film's l
 `applyTo` sets the renderer's tone mapping to AgX as Blender 5.2 draws it
 (`SS.blenderAgX`; three's own AgX shows the mid-tones about 15 % lighter).
 
+Area lights cast soft shadows, as soft as their size makes them. The kitchen,
+the lab and the desk room light as Cycles does (their bounce is Cycles', their
+lamps reach as far as their light goes); `SS.build(name, { THREE, reach: true })`
+ends every light where EEVEE ends it. A room's first still compiles its
+materials: 50 s for the kitchen the first time, about 20 s once the driver has
+cached them.
+
 The first build fetches the room's CC0 sets, Poly Haven models and HDRI into the
 shared library (about 650 MB for all four). Each room's cameras, marks, light,
 how its Blender materials are rebuilt in TSL and where it differs from the

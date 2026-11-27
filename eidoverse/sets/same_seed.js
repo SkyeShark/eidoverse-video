@@ -11,7 +11,8 @@
 //                night outside
 //
 //   const SS = await import(new URL('sets/same_seed.js', EIDOVERSE_DIR).href);
-//   const room = await SS.build('kitchen', { THREE });     // { shadows: false } builds it without shadow maps
+//   const room = await SS.build('kitchen', { THREE });     // { shadows: false } builds it without shadow maps,
+//                                                          // { reach: true } ends every light where EEVEE ends it
 //   scene.add(room.group);                 // metres, +Y up; move or turn room.group to place it
 //   room.applyTo(scene, renderer);         // its background (the world it was made in), AgX as Blender draws it, its exposure
 //   room.camera('wide', camera);           // one of room.cams (the film's lenses): position, aim, field of view
@@ -174,7 +175,11 @@ export async function build(name, ctx = {}) {
     if (reflection) disposables.push(reflection);
     const lighting = LL.environment(room, reflection);
     const bounds = boundsOf(room);
-    const lights = await LL.lights(room.lights, { shadows: ctx.shadows !== false, bounds });
+    // a room whose bounce is the grid (Cycles' bounce, the lamps' own light left to the lamps) has its lamps reach as
+    // far as their light goes, as in Cycles; the sealed room (no grid: its fill lights stand in for EEVEE's bounce)
+    // keeps EEVEE's reach for every light
+    const reach = typeof ctx.reach === 'boolean' ? ctx.reach : !room.grid;
+    const lights = await LL.lights(room.lights, { shadows: ctx.shadows !== false, bounds, reach });
     for (const l of lights) group.add(l);
 
     // ------------------------------------------------------------------------------------- the rest (TSL from graphs)

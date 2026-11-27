@@ -42,7 +42,12 @@ blender --background --factory-startup <made>/kitchen/kitchen.blend \
   each picture referred to by its CC0 ID, its HDRI ID or the room's print, which
   is copied to `prints/`). A Poly Haven part the room changed (a mesh edited,
   a material replaced) is written here too, its own materials still read from
-  the model by ID.
+  the model by ID. Every corner keeps the normal Blender shades it with (an
+  n-gon is cut into triangles for its tangents, and a custom normal, a
+  Weighted Normal modifier's, is carried across the cut), and the faces where
+  two parts touch (a gasket on its bead, a pane on its gasket, a skirting on
+  the floor) are each drawn 0.25 mm back into their own part, so three's depth
+  test does not fight along the edge where one ends on the other.
 - **lows**: the parts with UV `atlas`, one GLB per atlas, their look baked by
   Cycles at the atlas's size (`--max-size`, default 4096): base colour, ORM (the
   GPU bake's occlusion, roughness, metalness), a tangent-space normal (OpenGL,
