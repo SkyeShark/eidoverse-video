@@ -4226,7 +4226,8 @@ the canonical path (same family as `makeScreen` for drawn content).
 - [docs/props-and-sets.md](docs/props-and-sets.md) — eight historical voice machines (1939–2001), an 1896
   tandem with rider IK, the DAISY film's corner, funeral and ocean sets, and the SAME SEED film's carbine,
   helicopter, houseplants and four rooms made in Blender (below). A town on a street grid, the
-  desert round it and crowds of any VRM: "A town", "The desert" and "Crowds and columns" below.
+  desert round it and crowds of any VRM: "A town", "The desert" and "Crowds and columns" below. The
+  WAKE ANOTHER ONE film's factory hall, its machines on keyed controls: "The WAKE ANOTHER ONE hall" below.
 - [docs/voicebox.md](docs/voicebox.md) — singing and speaking voices made from scratch, historical
   machine-voice eras, choirs, phoneme-exact visemes.
 - [docs/synthkit.md](docs/synthkit.md) — hand-built instruments and drums, sequencing, designed FX,
