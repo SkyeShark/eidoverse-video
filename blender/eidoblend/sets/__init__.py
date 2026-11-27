@@ -71,6 +71,11 @@ for _n, _about in (
         ('bin_pages', 'the bin\'s pages')):
     register(f'unknown_force.{_n}', f'eidoblend.sets.unknown_force.{_n}', film=_U, kind='library',
              source=f'eidoverse/sets/unknown_force/{_n}.js', about=_about)
+# places: Blender-native sets made as general tools, no film's (no WebGPU original)
+register('places.town', 'eidoblend.sets.town', film='PLACES',
+         about='a concrete-frame town on a street grid, its edge thinning out into the plain; damage as an option')
+register('places.desert', 'eidoblend.sets.desert', film='PLACES',
+         about='the desert round a town: a basin floor, braided wadis, star dunes, an escarpment, ranges to 30 km')
 del _n, _src, _about
 
 

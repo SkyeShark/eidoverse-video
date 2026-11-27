@@ -599,6 +599,19 @@ The files are north-up (row 0 the north edge), as other tools expect; the
 JSON sidecar carries the size, cell, world origin, row order and the height
 range the 16-bit PNG is normalised over (the `.r32` is raw float32 metres).
 
+### Composing several recipes into one land
+
+`generate()` gives a recipe's levels as fields without a mesh, so several
+recipes can be composed into one land outside the family. The desert round
+a town ([props and sets](props-and-sets.md#the-desert-round-it)) is the
+worked example: `eidoblend.sets.desert.sources` runs `dunes` (star),
+`mesas_buttes` (hero levels round its plateau edge) and `fluvial_range`,
+keeps each level's fields with its window (`t.levels[i]`: x0, y0, side,
+cell, n; `t.fields(i)`), and `land.py` samples them, finest level first, into
+a dune field scaled 0.36, an escarpment turned to face the town, inselbergs
+and ranges drowned in their own alluvium, and the range's drainage network as
+the floor's rills.
+
 ### Judging a terrain against its place
 
 `python blender/tests/terrain/judge/run.py --recipe canyon --textured`

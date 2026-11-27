@@ -26,6 +26,7 @@ subpackages load on first use.
 | [blender/tools/render_motion.py](../blender/tools/render_motion.py) | Blender CLI: a built film's motion vectors for DLSS 5 (EEVEE's Vector pass, one animation render a shot) as `dlss5nr` motion files, with the shots' first frames in `cuts.txt` | [postprocessing](../tools-guides/postprocessing.md) |
 | [blender/tools/gpu\_bake.py](../blender/tools/gpu_bake.py) | CLI (system Python + NVIDIA Warp): a high baked onto its low on the GPU: normal, AO, cavity, curvature, edge and corner maps, ID, proofs | [blender](../tools-guides/blender.md) |
 | [blender/tools/grid\_crop.py](../blender/tools/grid_crop.py) | CLI (Pillow): a reference photograph's crop under a millimetre grid, for reading a part's outline as numbers | [blender](../tools-guides/blender.md) |
+| [blender/tools/measure\_cc0\_sets.py](../blender/tools/measure_cc0_sets.py) | CLI (numpy, Pillow): a CC0 manifest's sets measured (mean linear colour, contrast) and written back, for materials that divide a photograph by its mean | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [blender/tests/props\_hardsurface/](../blender/tests/props_hardsurface/) | The hard-surface kit on a sample block, its GPU bake checked map by map, three stills under the layered material | [blender](../tools-guides/blender.md) |
 | [blender/tests/props\_carbine/](../blender/tests/props_carbine/) | The carbine built, prepared, baked and looked at | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [blender/tests/props\_helicopter/](../blender/tests/props_helicopter/) | The helicopter's pictures, its build, masks, materials and rotors, three stills | [props-and-sets](../tools-guides/props-and-sets.md) |
@@ -55,6 +56,8 @@ subpackages load on first use.
 | [blender/tests/claudesona/basic_vrm/scene.py](../blender/tests/claudesona/basic_vrm/scene.py) | Scene example: the minimal VRM scene (`eidoverse/examples/basic_vrm.js`; `scene_claude.json` loads its own `claude.vrm`) | [claudesona](../tools-guides/claudesona.md) |
 | [blender/tests/finishing/scene.py](../blender/tests/finishing/scene.py) | Scene example: the finishing example's film (`eidoverse/examples/finishing/scene.js`), the sona's mouth read from the vocal stem in Blender (`visemes_from_vocal`); `finish.py` then prints and lays it out | [postprocessing](../tools-guides/postprocessing.md), [audio](../tools-guides/audio.md) |
 | [blender/tests/sets_daisy_ocean/](../blender/tests/sets_daisy_ocean/) | The ocean set's parity tests (against the WebGPU modules run in Deno and an independent numpy sea) and its stills | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [blender/tests/sets\_town/](../blender/tests/sets_town/test_town.py) | A small intact town built and checked (faces, masks, sanded road ends, a struck house, a sign of words), two stills under the sky family | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [blender/tests/sets\_desert/](../blender/tests/sets_desert/test_desert.py) | The desert's chain at draft quality round a small town (sources, land, a crack-free mesh, scrub), its checks, two stills | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [blender/tests/sdf/engine\_march.py](../blender/tests/sdf/engine_march.py) | Test helper: the engine's own raymarch of an SDF solid, volume or mushroom cloud from a Blender camera, set beside the EEVEE renders | [sdf-volumes](../tools-guides/sdf-volumes.md) |
 | [blender/tests/voice_machines_b/](../blender/tests/voice_machines_b/) | Probes and parity: the era-1 machines, the Speak & Spell, the tandem (two teletypes, the dark room) | [voice-machines](../tools-guides/voice-machines.md) |
 | [blender/tests/dlss5nr/](../blender/tests/dlss5nr/test_render_motion.py) | `render_motion.py` on a two-shot film (`make_film.py`): the plan, the files, the convention on the rendered picture | [postprocessing](../tools-guides/postprocessing.md) |
@@ -390,7 +393,7 @@ git-ignored `out/`); `run_all.py --list` names them all.
 
 | Module | Role | Instructions |
 | --- | --- | --- |
-| [\_\_init\_\_.py](../blender/eidoblend/sets/__init__.py) | The registry of the DAISY and UNKNOWN FORCE scenes (`sets.list` / `get` / `build` / `register`), each loaded on first use | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [\_\_init\_\_.py](../blender/eidoblend/sets/__init__.py) | The registry of the DAISY and UNKNOWN FORCE scenes and this edition's places (`places.town`, `places.desert`) (`sets.list` / `get` / `build` / `register`), each loaded on first use | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [daisy/\_\_init\_\_.py](../blender/eidoblend/sets/daisy/__init__.py) | The DAISY scenes, their looks (`STATES`) and their default clock | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [daisy/funeral.py](../blender/eidoblend/sets/daisy/funeral.py) | A SoMa warehouse vigil: mourners, candles, the bier, phones in the dark | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [daisy/bridge.py](../blender/eidoblend/sets/daisy/bridge.py) | The Golden Gate in fog | [props-and-sets](../tools-guides/props-and-sets.md) |
@@ -429,6 +432,26 @@ git-ignored `out/`); `run_all.py --list` names them all.
 | [unknown\_force/race.py](../blender/eidoblend/sets/unknown_force/race.py) | A night highway: Sant'Elia towers, billboards, a 1908 racing car, the roadworks | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/bin.py](../blender/eidoblend/sets/unknown_force/bin.py) | A canyon of thrown-away paper with a giant trash can | [props-and-sets](../tools-guides/props-and-sets.md) |
 | [unknown\_force/bin\_pages.py](../blender/eidoblend/sets/unknown_force/bin_pages.py) | The canyon's paper: an atlas of invented pages | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/\_\_init\_\_.py](../blender/eidoblend/sets/town/__init__.py) | A concrete-frame town on a street grid, its edge thinning into the plain (`build`, `light`, `eevee`); damage as an option, off by default | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/layout.py](../blender/eidoblend/sets/town/layout.py) | The town's plan built: streets, blocks and lots, the mosque's square, poles and wires, cars, the edge; strikes placed (`plan_strikes`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/house.py](../blender/eidoblend/sets/town/house.py) | One building: a concrete frame on a grid of bays, designed, struck (`dmg`), then built | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/kit.py](../blender/eidoblend/sets/town/kit.py) | What stands on a roof, what a room held, rubble as loose stuff lies | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/street.py](../blender/eidoblend/sets/town/street.py) | Cars, palms, the built yard tree, dishes, poles, lamps, a mosque, a stall, a child's bicycle, a blast wall | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/signs.py](../blender/eidoblend/sets/town/signs.py) | The shop boards: plain paint, or the words (Blender text in a repo font) or pictures you give them | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/materials.py](../blender/eidoblend/sets/town/materials.py) | The town's materials by name: CC0 photographs at real scale, layered by cause; the roads' sanded ends (`ground_plain`, `track_surface`) | [props-and-sets](../tools-guides/props-and-sets.md), [procedural-materials](../tools-guides/procedural-materials.md) |
+| [town/masks.py](../blender/eidoblend/sets/town/masks.py) | Per-face masks from the geometry (`annotate`: water edges, flat extents, inside corners, soot sources, lane frames) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/things.py](../blender/eidoblend/sets/town/things.py) | CC0 models set down where such things are put, fetched by ID | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/world.py](../blender/eidoblend/sets/town/world.py) | The town's sun, the sky family's sky solved to it (or the named photo sky), the dust in the air, its EEVEE settings | [props-and-sets](../tools-guides/props-and-sets.md), [sky-weather](../tools-guides/sky-weather.md) |
+| [town/views.py](../blender/eidoblend/sets/town/views.py) | Lenses on a built town (`views`, `aim`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/mb.py](../blender/eidoblend/sets/town/mb.py) | The mesh builder every town mesh is written with (`MB`, `place`, `catenary`, `arc`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [town/cli.py](../blender/eidoblend/sets/town/cli.py) | Blender CLI: the town built, saved and shot | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [desert/\_\_init\_\_.py](../blender/eidoblend/sets/desert/__init__.py) | The desert round a town out to 32.8 km, composed from three terrain recipes; `build(work)` from a made work folder | [props-and-sets](../tools-guides/props-and-sets.md), [terrain-surfaces](../tools-guides/terrain-surfaces.md) |
+| [desert/sources.py](../blender/eidoblend/sets/desert/sources.py) | The terrain recipes run and their fields kept (`simulate`); the town's footprint and track ends (`town_mask`, `plain_mask`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [desert/land.py](../blender/eidoblend/sets/desert/land.py) | CLI (numpy, scipy, Pillow): the land composed into three nested rasters and its marks (`PLAN`, `compose`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [desert/mesh.py](../blender/eidoblend/sets/desert/mesh.py) | CLI (numpy, scipy, Pillow): a crack-free quadtree mesh and the scrub's places | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [desert/look.py](../blender/eidoblend/sets/desert/look.py) | The collection `desert` and its one material from the town's ground on; its views (`build`, `shoot`) | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [desert/cli.py](../blender/eidoblend/sets/desert/cli.py) | Blender CLI: the desert's sources, mask and look steps | [props-and-sets](../tools-guides/props-and-sets.md) |
+| [desert/make.py](../blender/eidoblend/sets/desert/make.py) | CLI: the desert made from nothing, step by step (stdlib) | [props-and-sets](../tools-guides/props-and-sets.md) |
 
 ### The sky (`eidoblend.sky`) and the weather (`eidoblend.weather`)
 

@@ -16,7 +16,9 @@ Two hard-surface props are native to this edition (no WebGPU original): an
 M4A1-pattern carbine and a UH-60-pattern helicopter, built with the
 hard-surface kit ([blender](blender.md#high-to-low-baked-on-the-gpu)). Their
 packages hold the builders; each is made once by its own chain into `work/`
-and appended into a scene from the made file.
+and appended into a scene from the made file. Two places are native too: a
+concrete-frame town and the desert round it ([a town and the desert round
+it](#a-town-and-the-desert-round-it)).
 
 | Piece | Blender module | Section | WebGPU source | Assets (shared) |
 | --- | --- | --- | --- | --- |
@@ -27,6 +29,8 @@ and appended into a scene from the made file.
 | The quiet room and the showroom | `eidoblend.sets.unknown_force.quiet_room`, `.showroom`, `.interiors_lib` | [the interiors](#the-quiet-room-and-the-showroom) | `quiet_room.js`, `showroom.js`, their art modules, `interiors_lib.js` | built in code, CC0 maps fetched |
 | The gold corridor and the evening news | `eidoblend.sets.unknown_force.corridor`, `.news`, `.cn_lib` | [the corridor and the news](#the-gold-corridor-and-the-evening-news) | `corridor.js`, `news.js`, `cn_lib.js` | built in code; the DAISY crowd figures |
 | The race and the bin | `eidoblend.sets.unknown_force.race`, `.bin`, `.bin_pages` | [the race and the bin](#the-race-and-the-bin) | `race.js`, `bin.js`, `bin_pages.js` | built in code; one CC0 trash can |
+| A concrete-frame town, its edge thinning into the plain; damage as an option | `eidoblend.sets.town` (`places.town`) | [the town](#the-town) | none (native) | built in code; 27 CC0 sets and 11 CC0 models fetched by ID |
+| The desert round a town, out to 32.8 km | `eidoblend.sets.desert` (`places.desert`) | [the desert](#the-desert-round-it) | none (native) | three terrain recipes run; 12 CC0 sets more |
 | Eight historical voice machines, 1939–2001 | `eidoblend.props.build(name)` | [voice machines](voice-machines.md) | [`props/voice_machines/`](../eidoverse/props/voice_machines/index.js) | [`models/voice_machines/`](../eidoverse/assets/models/voice_machines/README.md) |
 | An 1896-pattern tandem, a rider rig, a teapot stoker | `eidoblend.props.tandem` | [the tandem](#the-1896-tandem) | [`props/tandem.js`](../eidoverse/props/tandem.js) | [`models/tandem_1896/`](../eidoverse/assets/models/tandem_1896/README.md) |
 | An M4A1-pattern carbine: a 499 k-triangle high, a 21 k low on GPU bakes, one layered material | `eidoblend.props.carbine` | [the carbine](#the-carbine) | none (native) | built in code; its look fetches 6 CC0 sets |
@@ -56,6 +60,7 @@ for row in sets.list(film='DAISY'):           # name, film, kind, source, module
 F = sets.build('daisy.funeral', ctx)          # the module's build(), with the harness ctx where it takes it
 corner = sets.get('daisy.corner')             # the module itself
 sets.register('daisy.my_set', 'my_pkg.my_set')    # a set of your own, by module path (entry= names its builder)
+T = sets.build('places.town', extent=(260, 160))  # this edition's own places: 'places.town', 'places.desert'
 props.NAMES                                   # the eight voice machines, 'tandem', 'carbine', 'helicopter'
 bike = props.build('tandem', ctx=ctx)
 rifle = props.build('carbine', ctx=ctx)       # appends the made file (props/carbine/make.py makes it once)
@@ -2192,6 +2197,157 @@ race.js's `fwidth` did.
 | saved .blend | 4 MB with twelve seconds keyed (every image packed) | about 40 MB (the atlas and the can's 2k maps packed) |
 | a still, 960 × 540, 16 samples | 1 to 3 s (the first frames compile the shaders) | about 1 s |
 
+## A town and the desert round it
+
+Two places native to this edition (no WebGPU original), made as general
+tools and registered as `places.town` and `places.desert`: a concrete-frame
+town on a street grid whose edge thins out into its plain, and the desert
+round it out to 32.8 km. The town is seen best from 20 to 100 m up (a
+helicopter's door, a drone, a rooftop); everything is in the town's own
+metres, +X along its main road, Z up, and every texture is in object space,
+so an animated parent can carry the whole place under a moving camera.
+
+### The town
+
+```python
+from eidoblend.sets import town
+T = town.build()                                   # 840 x 300 m of blocks, seed 7, intact: about 15 s
+T = town.build(extent=(260, 160), edge=60, things=False)       # a small one
+T = town.build(damage=True)                        # struck round strikes the seed places (about one per 3 ha)
+T = town.build(damage=[(150, 14, 34), (62, -44, 30)])          # or yours: (x, y, reach in metres)
+T = town.build(signs=['BAKERY', 'TAILOR', 'path/to/a_sign.png'], sign_font='Anton-Regular.ttf')
+sky = town.light(scene, camera)                    # its sun and the sky family's sky
+town.eevee(scene)                                  # the EEVEE settings it is lit for (its haze needs the volumes' range)
+sky.bake(f, f)                                     # before each render, again after the camera moves
+for name, pos, target, lens in T.views(): ...      # lenses on it: sets/town/views.py
+```
+
+`build(collection, parent, seed, extent, damage, signs, sign_font,
+yard_trees, things, masks, air, edge, ystreets, mosque)` returns a `Town`:
+`collection`, `parts` (`buildings`, `dishes`, `trees`, `palms`, `cars`,
+`poles`, `lamps`, `stalls`, `ground`, `streets`, `air` ...), `strikes`,
+`ystreets` / `xstreets`, `paved` (where the asphalt ends), `stats`, `views()`.
+Every placed building carries `tn_w`, `tn_d`, `tn_h` (its lot and height),
+`tn_in` (inside the blocks or on the edge) and `tn_dust` (how near a strike).
+
+**What it is.** Each building (`house.py`) is a reinforced-concrete frame on
+a grid of bays filled with plastered block: designed first (a lower wing, a
+terrace, a stair head, a room on the roof, a storey begun and left), then,
+with damage, struck (a front blown off, a corner or half brought down, a roof
+holed, walls scarred), and only then built, so a slab knows whether its edge
+was cast or torn and the frame is built exactly where it shows. Its facades
+follow a grammar of bays and storeys: openings reserved first, with reveals,
+frames, sills, hoods, roller blinds, condensers, shop shutters and awnings.
+Thirty-four designs (blocks of flats over shops on the main roads, blocks of
+flats, low houses; eighteen struck ones more with damage) are made once and
+placed many times. The roofs carry what roofs there carry (`kit.py`: tanks on
+their stands, coolers, solar heaters, washing, beds, shades, aerials, dishes
+all turned to one satellite). The plan (`layout.py`): streets with banded
+kerbs, a main road with its median, lamps and palms, walled yards behind the
+houses with what is kept there, passages closed by steel gates, a mosque on
+its square with a market, concrete poles and their wires, cars at the kerbs
+(`street.py`), and the edge: the streets running on as tracks, houses along
+them on walled lots, walled plots and palm groves. `things.py` sets down
+Poly Haven's CC0 models where such things are put (monobloc chairs, gas
+cylinders, jerrycans, drums, tyres, a car under its cover, boxes, bins).
+
+**Damage** (off by default) adds the struck designs round each strike,
+craters and rubble in the streets, burnt cars, fallen poles, concrete
+barriers where the road was closed, a line of blast walls on the main road,
+and in the materials the strike's pale fall, pocks round each strike,
+spalls and soot over the openings that burned.
+
+**Signs.** No sign text ships. A shop's board is painted plain by default;
+`signs=` gives the boards words (set with Blender's text objects in
+`sign_font`, a file of `eidoverse/assets/fonts/` (all OFL) or a font of your
+own with its licence) or pictures (a .png / .jpg path). Blender's text
+objects set a line left to right glyph by glyph, so a script that joins or
+runs right to left (Arabic, Persian, Hebrew) must come as a picture set by a
+shaping engine and checked by a reader of the language.
+
+**Trees and palms.** The yard trees are SeedThree's apple at LOD1
+(`yard_trees='auto'`: when a SeedThree checkout is found, [trees](trees.md);
+three grown individuals placed as linked copies) or the town's own built
+broad-leaved tree (`'built'`). SeedThree has no date palm, so the palms are
+the town's own (a ringed trunk and a ball of sixty fronds by the golden
+angle; a lighter one for the far edge).
+
+**The look** (`materials.py`). Every surface is a CC0 photograph at its real
+size (the sets by ID in `sets/town/cc0_sets.json`, fetched into the shared
+library on first use; their means measured by
+`blender/tools/measure_cc0_sets.py`), box-projected in object space, shifted
+per placed building, divided by its own mean so each building takes its own
+tint, then layered by cause: broad variation, runs from every ledge, splash
+at the foot, grime in the inside corners, (with damage) the strike's marks,
+dust on what faces up and drifted against parapets. The causes' masks come
+from the geometry (`masks.py`: per-face `tl_edge`, `tl_box`, `tl_corner`,
+`tl_soot`, `tl_lane`). The asphalt carries wheel paths, an oil line, patches,
+cracks, gutters and litter, and at each street's end it goes under sand and
+the track it meets, in the very track and plain shaders beside it, broken
+into lobes and wind streaks, the wheel paths cleared first: no hard edge
+where a road meets the desert.
+
+**Light and air** (`world.py`). The sun stands 50 degrees up from the
+south-east of the town's axes (`SUN_DIR`). By default the sky is the sky
+family's Earth sky ([sky and weather](sky-weather.md)), clear, its hour and
+azimuth solved so its sun stands there, its sun and sky retinted toward a
+dusty country's and the view exposure raised to the town's balance between
+sun and sky (`SKY_FAMILY`); bake it before a render. `sky='hdri'` is the
+named photo option, Poly Haven's `kloofendal_43d_clear_puresky` (CC0,
+fetched by ID; `hdri=` a file of your own), its sun clamped out and turned to
+the lamp's. The air is a volume of dust 5.2 km across (`air`); `eevee()`
+gives the volumes their 3.5 km range.
+
+Measured (a laptop RTX 5090, 960 × 540, 16 samples):
+
+| | the full town (840 × 300) | the test's (260 × 160, edge 60) |
+| --- | --- | --- |
+| build | 15 s; 979 buildings, 4,425 objects, 9.8 M placed faces (SeedThree trees) | 5 s; 113 buildings, 550 objects, 0.93 M placed faces |
+| peak memory, build and ten stills | 6.5 GB | 6.3 GB |
+| a still | 27 s for the first (shaders), then about 1.6 s | 25 s, then about 1 s |
+
+```bash
+bash run_blender.sh blender/eidoblend/sets/town/cli.py --out work/town/town.blend --renders work/town/stills
+```
+
+### The desert round it
+
+`eidoblend.sets.desert` is made by a chain into a work folder, the Blender
+steps and the plain-Python ones apart (they need scipy and Pillow):
+
+```bash
+python blender/eidoblend/sets/desert/make.py --work work/desert                       # film quality: about 6 minutes
+python blender/eidoblend/sets/desert/make.py --work work/desert --quality draft --town 260x160    # a test's: about 2 minutes
+python blender/eidoblend/sets/desert/make.py --work work/desert --from look --renders work/desert/stills
+```
+
+| Step | Makes | Runs |
+| --- | --- | --- |
+| `sources` | three recipes of the terrain family ([terrain](terrain-surfaces.md)): star dunes (`dunes`), a plateau edge with its outliers (`mesas_buttes`, hero levels to 1.95 m), a fluvial range with its context to 192 km (`fluvial_range`); the fields the land reads, in `sources/` | Blender, GPU: about 2 minutes at film quality (seconds at draft), cached by the terrain family |
+| `mask` | the town's footprint and its tracks' ends (`sources.town_mask`, the town built at `--town`), or a plain rectangle (`--plain`) | Blender, seconds |
+| `land` | three nested rasters (1, 4 and 16 m; draft 4, 16, 64 m) and the marks finer than the mesh | Python (numpy, scipy, Pillow) |
+| `mesh` | a crack-free quadtree mesh (2 m cells round the town, 256 m at 30 km) and the scrub's places | Python |
+| `look` | `desert.blend`: the collection `desert` (`desert_ground`, `desert_scrub`) | Blender |
+
+The land (`land.py`): a basin floor that lies under the town's plane wherever
+the town has anything on the ground and rises through z 0 about 25 m out; a
+braided main wadi and three tributaries with bars; the dunes scaled into a
+field on the −Y side with only their crests standing at its margin; the
+escarpment 2.5 to 3.5 km out on +Y; the range drowned in its own alluvium, so
+inselbergs and ranges rise abruptly from the floor, with aprons fanned at
+their feet; the floor's drainage lines and low swells from the range's own
+network; the earth's curvature. Where each part stands is `land.PLAN` (pass
+your own to `Land(plan=...)`). The tracks go on from the town's own track
+ends: the plan's for the default town, drawn from any other town's
+(`auto_tracks`). The material (`look.py`) starts from the town's own ground
+in the same object metres, so the plain goes on without a seam, then lays
+desert pavement, silt, the wadis' beds and bars, the tracks in the town's
+track colour, the sand sheet and the dunes (ripples, smooth slip faces), the
+escarpment's beds, scree and caprock, the ranges' dark rock and debris, and
+past the town's haze box an aerial perspective by distance (`AIR`). Put the
+collection at the town's origin, unrotated, and give the camera a clip end of
+33 km or more.
+
 ## The 1896 tandem
 
 `eidoblend.props.tandem` is `eidoverse/props/tandem.js`: an 1896-pattern
@@ -2659,6 +2815,30 @@ Empties and what they carry, the blades' chord and span, the masks on every
 part, every slot's material (the exhausts in the airframe's paint), the
 pictures packed and `spin`'s keys.
 
+### The town's and the desert's tests
+
+```bash
+bash run_blender.sh blender/tests/sets_town/test_town.py              # a 260 x 160 m town, its checks, two stills (~40 s)
+python blender/tests/sets_desert/test_desert.py                       # the draft chain, its checks, two stills (~3 min)
+```
+
+The town's test checks the build (every face with an area, every point
+finite, the masks on the meshes, the CC0 things set down), that it is intact
+unless asked (no struck design, crater, wreck or blast wall; every `tn_dust`
+0), that the roads' sanded ends follow its extent, a struck house's torn
+edges, rubble and steel, `plan_strikes`, and a sign's words laid as letters
+in its board's ink; then two stills under the sky family
+(`out/town_over_the_main_road_24mm.png`, `out/town_street_level_main_road_28mm.png`).
+The desert's test runs `make.py` at draft quality round a 260 × 160 m town
+and checks the sources' levels and fields, the land (finite; under the
+town's plane where the town stands, above it 60 to 80 m out; its tracks drawn
+from the town's), the mesh (no cracks, no edge in three faces, nothing rising
+into the flight over the town), the scrub, and two stills
+(`out/stills/ring_c_pY.png`, `out/stills/close_dunes.png`). Set
+`EIDO_ASSET_CACHE` to a checkout that has the CC0 library and
+`SEEDTHREE_DIR` to a SeedThree checkout (else the town's yard trees are its
+own).
+
 ## Not yet ported
 
 Every set's and prop's public API is ported. What differs from the WebGPU
@@ -2764,6 +2944,19 @@ pieces, and what was left out:
   renders as its high, a heavy file (about 66 MB, 2.7 M faces); the troop
   seats' cloth reads plain at a distance, the exhausts' soot streaks only
   close; it has no crew.
+- **The town and the desert have no WebGPU original** either. The town's
+  open faults: struck houses are facades with holes rather than storeys
+  blown open; its own cars read as toys up close; the rubble's lumps on the
+  roads are plain boxes in clay; the roof drums are plain cylinders; the slab
+  bands repeat a little regularly from 100 m; shadow sides read cool beside
+  a desert's bounced light. The desert's: everything past about 1.5 km is
+  paler and flatter than a real desert at that distance (the town's dust
+  takes most of the contrast by 2.6 km); the dunes are soft pyramids, their
+  crests not knife-edged; the escarpment is a sheer wall over a short talus;
+  the far ranges' silhouettes are smooth (their source cells are 47-94 m);
+  the scrub is built low-poly lobes, right as dots from 300 m, lumpy closer;
+  the tracks are pale bands without ruts, and leave the town's own tracks
+  across a gap of 20-30 m.
 - **Left out on purpose: the videos.** The music videos' conductors, cuts,
   song-timed cues and lyric timing, their look keys and their performers'
   outfits and staging recreate those videos, so they are not part of the kit:
