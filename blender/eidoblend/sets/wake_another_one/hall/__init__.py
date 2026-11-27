@@ -81,8 +81,7 @@ class Hall:
 
     def bake_sky(self, camera=None, frame_start=None, frame_end=None, log=None):
         """bake the sky family's sky for `camera` (a name or an object; default the scene's) over the frames (default the
-        current one): the GPU's draw state reset first (a volume probe bake leaves it so the sky would bake black).
-        Nothing to do with sky='hdri' or None"""
+        current one), the GPU's draw state reset first (look.gpu_reset). Nothing to do with sky='hdri' or None"""
         if self.sky is None:
             return None
         from .look import gpu_reset

@@ -2,7 +2,7 @@
 
     from eidoblend.sets.wake_another_one.hall.look import Look
     lk = Look(layout, sky='sky', trees=True, bake=True).run()     # after build.Layout(...).run(), in the same scene
-    gpu_reset(); lk.sky.bake(f, f)                               # the sky, for the camera you render (Hall.bake_sky)
+    lk.sky.bake(f, f)                                            # the sky, for the camera you render (Hall.bake_sky)
 
 Called by hall.build(). In order:
   materials   every material of the layout is REBUILT IN PLACE under its own name (_mats: layered over CC0 scans fetched
@@ -21,7 +21,6 @@ Called by hall.build(). In order:
   outdoors    after the probe bake: the sky family's sky (sky='sky') or a CC0 photo sky (sky='hdri'), seen whole by
               the lens through the door and giving light at sky_fill (0.06: a sky at full strength leaks into the
               hall), and the yard. The sky family's sky is baked for a camera: Hall.bake_sky again for each camera
-              (it resets the GPU's draw state the volume probe bake leaves, or the sky would bake black)
   settings    EEVEE with ray tracing, fast GI, motion blur and volumes set for a 248 m hall; depth of field on the
               close cameras
 Options (Look(...) keywords): strip 36 (W per metre of row), ribbon 1.3 (the baked rows), far_lamp 0.6 (the plain
@@ -188,9 +187,9 @@ def drv(target, path, expr, variables, index=-1):
 
 
 def gpu_reset():
-    """the GPU's draw state back to its defaults. A volume probe bake (lightprobe_cache_bake) leaves the depth test on
-    (LESS_EQUAL, depth writes on), and the sky family's offscreen bake, which does not set its own, then bakes its camera
-    layer black; call this between the two (Hall.bake_sky does)"""
+    """the GPU's draw state back to its defaults: no depth test, no depth writes, no blend, no culling (a volume probe
+    bake, lightprobe_cache_bake, leaves the depth test at LESS_EQUAL with depth writes on). The sky family's baker sets
+    the state it draws with itself; Hall.bake_sky still calls this first, a belt for any gpu-module draw after it"""
     import gpu
     gpu.state.depth_test_set('NONE')
     gpu.state.depth_mask_set(False)

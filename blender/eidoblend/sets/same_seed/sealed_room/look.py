@@ -641,6 +641,7 @@ def place_camera(room, at=(X0 / 1000.0, 2.45, 2.30), aim_at=(0.0, -0.75, 0.9)):
     aim = Vector(aim_at) - Vector((at[0] + 0.15, at[1], at[2] + 0.03))
     yaw = math.degrees(math.atan2(aim.y, aim.x))                        # (from +x, the way the mount faces)
     pitch = math.degrees(math.atan2(-aim.z, aim.xy.length))
+    body.rotation_mode = 'XYZ'                                          # (the glTF importer leaves it in quaternions)
     body.rotation_euler = Euler((math.radians(pitch), 0.0, math.radians(yaw)), 'XYZ')
     return root
 

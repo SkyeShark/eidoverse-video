@@ -2438,9 +2438,10 @@ H.bake_sky('cam_dock', 1, 480)                      # the sky family's sky, for 
     strength a sky leaks into the hall. `trees=False` leaves the SeedThree
     trees out of the yard.
 - **The sky and the probe bake.** A volume probe bake leaves the GPU's depth
-  test on, and the sky family's offscreen bake does not set its own, so after
-  one the sky would bake black. `Hall.bake_sky` resets the draw state first:
-  bake the sky through it.
+  test on (`LESS_EQUAL`, depth writes on). The sky family's baker sets the
+  draw state it needs itself and puts back the one it found, so the sky bakes
+  the same before and after the probe bake. `Hall.bake_sky` bakes it for a
+  named camera and its frames.
 - **Its options** are `look.Look`'s: `strip`, `ribbon`, `far_lamp`, `bounce`,
   `sun`, `sky_gain`, `sky_clamp`, `sky_fill`, `haze`, `drum_lamp`,
   `exposure`, `samples`. Pass them to `hall.build`. Every dimension is in
@@ -3286,7 +3287,9 @@ them:
   are smooth painted sheet with no mill scale under the paint, their runs dark
   brown; the bench top's mottle reads milky at grazing light; the welds
   barely show in its own light; the block's relief is a scan held down by its
-  strength.
+  strength. One thing differs from the film: the security camera's body is
+  turned to the bench and tipped down, as the look means it; in the film's
+  frames it faces straight out from the wall.
 - **The kitchen.** The basil reads pale and silvery (gloss and translucency),
   not basil green; the photographs held on the refrigerator are near black
   (the garden picture is stored dark); the pine table is a saturated orange
