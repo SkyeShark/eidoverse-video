@@ -12,6 +12,12 @@ and its focal points. Nothing in them runs on a song's clock; their default
 timings are where they came from, and every moving part has its own
 controls. A saved `.blend` plays and renders any frame on its own.
 
+Two hard-surface props are native to this edition (no WebGPU original): an
+M4A1-pattern carbine and a UH-60-pattern helicopter, built with the
+hard-surface kit ([blender](blender.md#high-to-low-baked-on-the-gpu)). Their
+packages hold the builders; each is made once by its own chain into `work/`
+and appended into a scene from the made file.
+
 | Piece | Blender module | Section | WebGPU source | Assets (shared) |
 | --- | --- | --- | --- | --- |
 | The funeral: a bridge in fog, a warehouse vigil | `eidoblend.sets.daisy.funeral`, `.bridge` | [the funeral](#the-funeral), [the bridge](#the-bridge-in-fog) | [`sets/funeral.js`](../eidoverse/sets/funeral.js), [`funeral/bridge.js`](../eidoverse/sets/funeral/bridge.js) | [`sets/funeral/`](../eidoverse/assets/sets/funeral/README.md), `models/funeral_*.glb` |
@@ -23,6 +29,8 @@ controls. A saved `.blend` plays and renders any frame on its own.
 | The race and the bin | `eidoblend.sets.unknown_force.race`, `.bin`, `.bin_pages` | [the race and the bin](#the-race-and-the-bin) | `race.js`, `bin.js`, `bin_pages.js` | built in code; one CC0 trash can |
 | Eight historical voice machines, 1939–2001 | `eidoblend.props.build(name)` | [voice machines](voice-machines.md) | [`props/voice_machines/`](../eidoverse/props/voice_machines/index.js) | [`models/voice_machines/`](../eidoverse/assets/models/voice_machines/README.md) |
 | An 1896-pattern tandem, a rider rig, a teapot stoker | `eidoblend.props.tandem` | [the tandem](#the-1896-tandem) | [`props/tandem.js`](../eidoverse/props/tandem.js) | [`models/tandem_1896/`](../eidoverse/assets/models/tandem_1896/README.md) |
+| An M4A1-pattern carbine: a 499 k-triangle high, a 21 k low on GPU bakes, one layered material | `eidoblend.props.carbine` | [the carbine](#the-carbine) | none (native) | built in code; its look fetches 6 CC0 sets |
+| A UH-60-pattern helicopter, its cabin open, its rotors keyed | `eidoblend.props.helicopter` | [the helicopter](#the-helicopter) | none (native) | built in code, every picture drawn |
 
 Every asset folder has a README and a SOURCES file (licences, provenance);
 the UNKNOWN FORCE sets list theirs in
@@ -48,8 +56,9 @@ for row in sets.list(film='DAISY'):           # name, film, kind, source, module
 F = sets.build('daisy.funeral', ctx)          # the module's build(), with the harness ctx where it takes it
 corner = sets.get('daisy.corner')             # the module itself
 sets.register('daisy.my_set', 'my_pkg.my_set')    # a set of your own, by module path (entry= names its builder)
-props.NAMES                                   # the eight voice machines and 'tandem'
+props.NAMES                                   # the eight voice machines, 'tandem', 'carbine', 'helicopter'
 bike = props.build('tandem', ctx=ctx)
+rifle = props.build('carbine', ctx=ctx)       # appends the made file (props/carbine/make.py makes it once)
 ```
 
 `sets.build(name, ctx, **options)` hands the harness ctx to a builder as
@@ -2263,6 +2272,114 @@ cuts and lens changes, and under an orthographic camera);
 `build_teapot_rider` takes the engine's `height`, `segments`, `color`,
 `pitch`, `roll`, `contact` and `seat_offset`.
 
+## The carbine
+
+`eidoblend.props.carbine` is an M4A1-pattern carbine built as a game-quality
+hard-surface asset with the kit ([blender](blender.md#high-to-low-baked-on-the-gpu)):
+a HIGH of 64 parts and about 499 k triangles, each part one mass the way it is
+made (the receivers forgings with forged-in features, machined cuts and edges
+rounded by group; the pistol grip one moulded shell; the magazine one pressed
+skin with its ribs in the section; knurled and fluted small parts), a LOW of
+the same 64 parts and about 21 k triangles drawn from the same tables, the
+high baked onto the low on the GPU, and one layered material on the bakes.
+Function markings only (the rails' numbers, the selector's SAFE / SEMI /
+AUTO): no maker's marks, no serial.
+
+Make it once (each step its own process; about 15 minutes in all, the UV pack
+most of it):
+
+```bash
+python blender/eidoblend/props/carbine/make.py                 # -> work/props/carbine/carbine.blend
+python blender/eidoblend/props/carbine/make.py --stills        # and three views in the studio, work/props/carbine/stills/
+python blender/eidoblend/props/carbine/make.py --from look --condition wear=1.4,dust=1.2    # another condition, same bake
+```
+
+| Step | Makes | Runs |
+| --- | --- | --- |
+| `decals` | the drawn data at real size: the grip's chequered panel (a 16-bit height), the lettering (the repo's Space Mono Bold, OFL) | Pillow |
+| `high` / `low` | `carbine_high.blend`, `carbine_low_raw.blend` (`high.build(low=...)`) | Blender, seconds |
+| `prep` | the low finished (`lowpoly.prepare_low`: 1,009 islands, 58 % of a 4096 set at 4.9 px/mm), the bake's inputs | Blender, ~12 min at 1024 cells (`--cells 512`: ~5 min, 30 % of the set) |
+| `bake` | `bake/carbine_*.png`: normal, masks, ID, and through `layers.py` the markings and the grip's chequering and backstrap ribs (as normal and as a relief map) | `gpu_bake.py`, ~10 s of GPU (about 3 % of the samples miss: bores the carbine hides) |
+| `look` | `carbine.blend`: the collection `carbine`, every image packed | Blender; fetches its 6 CC0 photographs once |
+
+Then, in a scene:
+
+```python
+from eidoblend import props
+rifle = props.build('carbine', ctx=ctx)          # or carbine.build(blend='work/props/carbine/carbine.blend')
+rifle.group.location = (0.45, -0.3, 0.92)        # its root Empty (carbine_root): lay it on a bench, put it in hands
+rifle.group.rotation_euler = (math.radians(90), 0, 0)
+rifle.parts                                      # the 64 meshes; rifle.dispose() removes them
+```
+
+Its space: metres, +X to the muzzle, +Z up, +Y the carbine's left; the origin
+on the bore's axis at the receiver's rear face (it runs from the butt at
+x = -0.1785 to the flash hider at 0.582); every part at identity. Its look
+(`look.py`) is `materials.layered.baked_material` with the carbine's own
+tables ([procedural materials](procedural-materials.md#a-layered-material-on-baked-maps)):
+hard-anodised aluminium (the upper, the lower and the fore-end each a batch's
+own tone), phosphated steel, black oxide, moulded polymer, the magazine's grey
+dry film, stainless, rubber; worn at its edges and its extremities, polished
+and fingerprinted where hands go (`look.HANDS`), dusty in its recesses, carbon
+at the muzzle and behind the ejection port. `make.py --condition
+wear=..,dust=..,grime=..,polish=..` scales the condition. The parts by name
+are its anatomy (`upper_receiver`, `lower_receiver`, `rail_fore_end`,
+`pistol_grip`, `magazine`, `stock`, `optic`, `trigger`, `selector_lever`,
+`charging_handle` ...): hide one, or find a hand's place on it.
+
+## The helicopter
+
+`eidoblend.props.helicopter` is a UH-60-pattern helicopter built from one
+measured datum (`datum.py`: the type's published dimensions and level side-on
+photographs read under a grid): a lofted skin whose sections are the
+aircraft's own (a blunt nose with its bill, the canopy's flat panes between
+posts, a slab-sided cabin, the boom), hollow, every opening cut square through
+the wall with its glass, retainers, seals and screws; the roof's spine,
+engines and exhausts; the pylon, the stabilator and the tail rotor; the main
+rotor's head (swashplate, hub, spindles, dampers, links, bifilar) and four
+twisted, swept-tip blades; the gear as it hangs in flight; inside, the troop
+and gunners' seats, the pilots' armoured seats, the panel and consoles; the
+cabin doors slid open. 290 parts, about 2.7 M faces once its masks are on.
+Function stencils only: no service title, no serial, no unit's mark.
+
+It renders as its HIGH: its look stores what each layer needs on the high's
+own vertices (`look.vertex_masks`: the nearness of its exposed arrises and
+inside corners, its openness near and far, after each part is cut to edges
+no longer than 1.4-5 cm) and one layer stack reads them
+(`look.surface_group`): a flat drab chalked by the sun, every frame and
+stringer a row of rivet heads, every joint a fine seam (drawn at real size by
+`decals.py`, 2.5 mm a pixel, and laid through the hull from each side), the
+stencils reading true on both sides, dust thick on the belly and the lower
+flanks, soot streaked aft from the exhausts along the boom (the exhaust ducts
+and their shields wear the airframe's paint and take the same soot), oil runs
+under the gearbox, boots at the sills, quilted blankets inside, a non-skid
+floor worn at the doors, tinted glass under a film of dust, black blades with
+a bright erosion strip.
+
+```bash
+python blender/eidoblend/props/helicopter/make.py              # -> work/props/helicopter/helicopter.blend (~3 min)
+python blender/eidoblend/props/helicopter/make.py --stills --views left_front_above,left_front_below,nose_left
+```
+
+```python
+from eidoblend import props
+heli = props.build('helicopter', ctx=ctx)        # the collection 'helicopter' under helicopter_root
+heli.group.location = (240.0, 0.0, 70.0)         # fly it by keying its root: nose along -X, pitch it into its way
+heli.group.rotation_euler = (0.0, math.radians(-5.0), 0.0)
+heli.spin(1, 1440, fps=24)                       # the rotors keyed turning: 258 rpm (counter-clockwise from above), 1190
+heli.main_rotor, heli.tail_rotor, heli.parts; heli.dispose()
+```
+
+Its space: metres, x AFT of the mast, y to the aircraft's RIGHT, z UP from the
+cabin floor (the nose at x = -4.5, the tail rotor's hub at x = 9.9; the
+main wheels hang to z = -0.91). `main_rotor` turns about its local Z (the mast,
+leaning 3 degrees forward under `mast_tilt`), `tail_rotor` about its local Y
+(the shaft, canted 20 degrees under `tail_rotor_cant`); `spin` keys both
+LINEAR from their current angles. At the open left door a troop seat faces
+out (`seat_door_l`, its pan 0.445 m above the floor at x 0.12, y -0.70): a
+performer sits there. `cli.py stills` renders the named views of
+`cli.VIEWS` in daylight (a sun and a pale sky).
+
 ## A library GLB on its own
 
 For a static piece of a set (a crate, a lamp, a tent), import its GLB and
@@ -2337,6 +2454,8 @@ shared GPU). The sets' own commands are in their sections' tests below.
 | the corridor and the news | `blender/tests/sets_uf_corridor_news/` |
 | the race and the bin | `blender/tests/sets_uf_race_bin/` |
 | the tandem (with the era-1 voice machines) | `blender/tests/voice_machines_b/` |
+| the carbine | `blender/tests/props_carbine/` |
+| the helicopter | `blender/tests/props_helicopter/` |
 
 ### The DAISY sets' tests
 
@@ -2519,6 +2638,27 @@ and reopens the saved file, and `test_dark_room_and_back_views.py` renders it
 from its left side at speed, where the smeared spokes must shade without
 sparkle.
 
+### The carbine's and the helicopter's tests
+
+```bash
+bash run_blender.sh blender/tests/props_carbine/test_build.py         # high, low, prep at a test's size (2048, 512 cells): ~5 min
+python blender/tests/props_carbine/test_bake.py                       # decals + the GPU bake with its layers (SKIP without CUDA)
+bash run_blender.sh blender/tests/props_carbine/test_look.py          # the look, the registry's build, three stills
+python blender/tests/props_helicopter/test_decals.py                  # the drawn pictures (Pillow)
+bash run_blender.sh blender/tests/props_helicopter/test_build.py      # the high, the masks and materials, spin (~2 min)
+bash run_blender.sh blender/tests/props_helicopter/test_stills.py     # three views: the nose and the windows from the door's side
+```
+
+Each writes into its own `out/`; the stills are in `out/stills/`. The
+carbine's build checks its 64 parts closed, about 499 k triangles in the high
+and 21 k in the finished low, its space, its edge groups, the pack; its bake
+the misses (under 4 %), the markings and the relief; its look the delivered
+file (parts at identity, triangulated, UVs, every image packed) and
+`dispose()`. The helicopter's build checks its 290 parts closed, the rotors'
+Empties and what they carry, the blades' chord and span, the masks on every
+part, every slot's material (the exhausts in the airframe's paint), the
+pictures packed and `spin`'s keys.
+
 ## Not yet ported
 
 Every set's and prop's public API is ported. What differs from the WebGPU
@@ -2616,6 +2756,14 @@ pieces, and what was left out:
   character controller a vehicle carries the VRM; nothing runs at render time
   here). The quiet room's `osb`, `galv` and `chrome` materials are defined in
   the engine and never put on a mesh, so they are not built.
+- **The carbine and the helicopter have no WebGPU original**: they are this
+  edition's own, so the WebGPU editions have neither yet (no GLB of either is
+  in `eidoverse/assets/models/`). What the carbine still lacks: a sling (only
+  its loop at the toe), lens covers on the optic; its rear sight's base sits
+  on the rail's teeth; its UV pack fills 58 % of the set. The helicopter
+  renders as its high, a heavy file (about 66 MB, 2.7 M faces); the troop
+  seats' cloth reads plain at a distance, the exhausts' soot streaks only
+  close; it has no crew.
 - **Left out on purpose: the videos.** The music videos' conductors, cuts,
   song-timed cues and lyric timing, their look keys and their performers'
   outfits and staging recreate those videos, so they are not part of the kit:

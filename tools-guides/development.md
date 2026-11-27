@@ -31,7 +31,9 @@ is their work too: the runner refuses to rebuild over it without `--force`.
   runner also adds the script's own folder to `sys.path`.
 - **One subpackage per family:** `eidoblend.harness`, `characters`, `course`,
   `fabrication`, `flora`, `fx`, `look`, `materials`, `media`, `placement`,
-  `props` (the DAISY props; it builds on `media`'s screens), `sdf`, `sets`,
+  `props` (the DAISY props, which build on `media`'s screens; the hard-surface
+  kit and the carbine and helicopter built with it, which use `materials` and
+  `look`), `sdf`, `sets`,
   `sky`, `terrain`, `trees`, `weather`, `xr`. `blender/eidoblend/__init__.py`
   imports nothing, and every family loads its subpackages on first use
   (module `__getattr__`), so importing one family never loads another and

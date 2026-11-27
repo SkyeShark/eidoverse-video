@@ -136,7 +136,8 @@ def fc_value(obj, prop, frame):
 def probe_api():
     # the registry needs no Blender: names, records, the lazy loader
     check(props.NAMES == ['voder', 'mainframe', 'teletype', 'speakspell', 'c64', 'mac1984', 'dectalk',
-                          'desktop2001', 'tandem'], f'props.NAMES = the eight machines and the tandem: {props.NAMES}')
+                          'desktop2001', 'tandem', 'carbine', 'helicopter'],
+          f'props.NAMES = the eight machines, the tandem, the carbine and the helicopter: {props.NAMES}')
     check(VM.NAMES == list(VM.MACHINES) and len(VM.NAMES) == 8, 'voice_machines.NAMES: eight, in index.js order')
     check([VM.MACHINES[n]['year'] for n in VM.NAMES] == [1939, 1961, 1966, 1978, 1982, 1984, 1984, 2001],
           'MACHINES years 1939 -> 2001 as index.js')

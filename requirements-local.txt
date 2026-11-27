@@ -21,6 +21,12 @@ requests
 # Tier 3 — HEAVY: vocal separation for music videos (pulls PyTorch, ~3GB):
 # demucs
 #
+# Tier 4 — the Blender edition's GPU baker (blender/tools/gpu_bake.py; see
+# tools-guides/blender.md "High to low, baked on the GPU"). NVIDIA Warp
+# (Apache-2.0) runs every ray on a CUDA GPU, or on the CPU without one;
+# Pillow and scipy also draw a prop's decals and fill the bake's gutters:
+# warp-lang>=1.18  numpy>=2.5  scipy>=1.18  pillow>=12
+#
 # Music/SFX generation additionally needs a ComfyUI install with the
 # MiniMax Music 3 (recommended music) / Stable Audio (SFX) models.
 # generate_song.py runs the music workflow — see docs/SETUP.md §5.

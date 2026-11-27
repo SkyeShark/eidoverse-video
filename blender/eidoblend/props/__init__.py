@@ -1,17 +1,20 @@
-"""eidoblend.props: the DAISY film's finished props, built by name (eidoverse/props/, ported): the eight voice machines
-and the 1896 tandem.
+"""eidoblend.props: finished props built by name: the DAISY film's eight voice machines and the 1896 tandem
+(eidoverse/props/, ported), and the hard-surface carbine and helicopter (Blender-native, made by their own chains); and
+the hard-surface kit they are built with (props.hardsurface).
 
     import sys; sys.path.insert(0, '<repo>/blender')
     from eidoblend import props
 
-    props.NAMES                        # the eight voice machines, 1939 -> 2001, and the 1896 tandem
+    props.NAMES                        # the eight voice machines, 1939 -> 2001, the 1896 tandem, the carbine, the helicopter
     c64 = props.build('c64')           # a voice machine: group (its root Empty), parts, update(t, state), dispose()
     mod = props.load('voder')          # the module itself (its build() and any extras, e.g. the Voder's pattern(t))
-    from eidoblend.props import voice_machines, tandem      # the subpackage and the tandem's module, directly
+    rifle = props.build('carbine', ctx=ctx)       # appends the made asset (props/carbine/make.py makes it once)
+    from eidoblend.props import voice_machines, tandem, carbine, helicopter, hardsurface   # directly
 
 Nothing is imported until it is asked for: this registry maps names to modules and loads one on demand, so reading
 NAMES or REGISTRY needs neither Blender nor any prop's module. Guides: tools-guides/voice-machines.md (the machines),
-tools-guides/props-and-sets.md (the tandem and the sets).
+tools-guides/props-and-sets.md (the tandem, the carbine, the helicopter and the sets), tools-guides/blender.md (the
+hard-surface kit).
 """
 from __future__ import annotations
 
@@ -21,12 +24,16 @@ VOICE_MACHINES = ('voder', 'mainframe', 'teletype', 'speakspell', 'c64', 'mac198
 
 REGISTRY = {name: f'{__name__}.voice_machines.{name}' for name in VOICE_MACHINES}
 REGISTRY['tandem'] = f'{__name__}.tandem'
+REGISTRY['carbine'] = f'{__name__}.carbine'
+REGISTRY['helicopter'] = f'{__name__}.helicopter'
 
 NAMES = list(REGISTRY)
+SUBPACKAGES = ('voice_machines', 'tandem', 'hardsurface', 'carbine', 'helicopter')
 
 
 def load(name: str):
-    """The module that builds one prop (props/voice_machines/<name>.py or props/tandem.py), imported on first use."""
+    """The module that builds one prop (props/voice_machines/<name>.py, props/tandem.py, props/carbine/,
+    props/helicopter/), imported on first use."""
     if name not in REGISTRY:
         raise ValueError(f"[props] unknown prop '{name}' (have: {', '.join(NAMES)})")
     if name in VOICE_MACHINES:
@@ -60,7 +67,8 @@ def build(prop: str, opts: dict = None, /, **kw):
 
 
 def __getattr__(name):
-    """props.voice_machines (the subpackage) and props.tandem (its module), imported on first access."""
-    if name in ('voice_machines', 'tandem'):
+    """props.voice_machines, props.tandem, props.hardsurface, props.carbine, props.helicopter, imported on first
+    access."""
+    if name in SUBPACKAGES:
         return importlib.import_module(f'{__name__}.{name}')
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')

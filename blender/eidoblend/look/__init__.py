@@ -20,14 +20,16 @@ frame_stats runs outside Blender too):
     probe_cli        the command line: --blend X --at 1.5 --at 4 [--preroll 1] [--compare]
     audit            the audit ledger (records, inventory, declarations, coverage, digest)
     overlap          exact mesh-mesh overlap from BVH trees, push_clear
+    studio           the judging room for an asset's look: a gradient with softboxes, key and rim, a grey ball and a
+                     mirror ball, shoot(path, centre, pos)
 
-Guides: tools-guides/camera-lighting.md, postprocessing.md, render-review.md, stack-notes.md.
+Guides: tools-guides/camera-lighting.md, postprocessing.md, render-review.md, stack-notes.md; the studio: blender.md.
 """
 
 import importlib
 
 MODULES = ('render_settings', 'exposure', 'frame_stats', 'camera', 'camera_safety', 'camera_audit', 'lighting',
-           'stage_rig', 'post', 'probe', 'probe_cli', 'audit', 'overlap')
+           'stage_rig', 'post', 'probe', 'probe_cli', 'audit', 'overlap', 'studio')
 
 
 def __getattr__(name):
